@@ -1,35 +1,52 @@
-import { errorResponse } from "@/lib/claude";
+import { errorResponse } from "@/lib/ai";
+import { yandexRecognize } from "@/lib/yandex";
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-// Любой сервис с OpenAI-совместимым API распознавания речи: OpenAI Whisper, Groq и т.п.
-const STT_BASE_URL = process.env.STT_BASE_URL || "https://api.openai.com/v1";
-const STT_MODEL = process.env.STT_MODEL || "whisper-1";
+// Распознаёт один фрагмент речи: браузер режет запись на куски до 25 с в формате LPCM 16 кГц моно.
+// По умолчанию Yandex SpeechKit; STT_PROVIDER=openai — любой OpenAI-совместимый Whisper (OpenAI, Groq).
+const SAMPLE_RATE = 16000;
+const MAX_BYTES = 1024 * 1024;
+
+function wav(pcm: ArrayBuffer) {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.byteLength, 4);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(SAMPLE_RATE, 24);
+  header.writeUInt32LE(SAMPLE_RATE * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.byteLength, 40);
+  return new Blob([header, new Uint8Array(pcm)], { type: "audio/wav" });
+}
+
+async function whisper(pcm: ArrayBuffer) {
+  const apiKey = process.env.STT_API_KEY;
+  if (!apiKey) throw new Error("Не задан STT_API_KEY в настройках сайта");
+  const form = new FormData();
+  form.append("file", wav(pcm), "chunk.wav");
+  form.append("model", process.env.STT_MODEL || "whisper-1");
+  form.append("response_format", "text");
+  const res = await fetch(`${process.env.STT_BASE_URL || "https://api.openai.com/v1"}/audio/transcriptions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Ошибка распознавания (${res.status}): ${(await res.text()).slice(0, 300)}`);
+  return (await res.text()).trim();
+}
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.STT_API_KEY;
-    if (!apiKey) {
-      return errorResponse(new Error("Распознавание речи не настроено: задайте STT_API_KEY в .env.local"), 501);
-    }
-    const form = await req.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return errorResponse(new Error("Файл не передан"), 400);
-
-    const upstream = new FormData();
-    upstream.append("file", file, file.name || "audio.webm");
-    upstream.append("model", STT_MODEL);
-    upstream.append("response_format", "text");
-
-    const res = await fetch(`${STT_BASE_URL}/audio/transcriptions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: upstream,
-    });
-    if (!res.ok) {
-      return errorResponse(new Error(`Ошибка распознавания (${res.status}): ${await res.text()}`), 502);
-    }
-    const text = (await res.text()).trim();
+    const pcm = await req.arrayBuffer();
+    if (!pcm.byteLength) return errorResponse(new Error("Пустой фрагмент"), 400);
+    if (pcm.byteLength > MAX_BYTES) return errorResponse(new Error("Фрагмент больше 1 МБ"), 413);
+    const text = process.env.STT_PROVIDER === "openai" ? await whisper(pcm) : await yandexRecognize(pcm);
     return Response.json({ text });
   } catch (err) {
     return errorResponse(err);

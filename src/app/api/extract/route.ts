@@ -1,5 +1,5 @@
 import mammoth from "mammoth";
-import { errorResponse } from "@/lib/claude";
+import { errorResponse } from "@/lib/ai";
 
 
 // Достаёт текст из .docx (PDF и картинки модель читает сама, текстовые файлы читаются в браузере).

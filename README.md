@@ -10,17 +10,18 @@ cp .env.example .env.local   # вписать ключи
 npm run dev                  # http://localhost:3000
 ```
 
-Нужны два ключа:
-- `ANTHROPIC_API_KEY` — Claude (конспекты, карточки, тесты, перевод), https://console.anthropic.com/
-- `STT_API_KEY` — распознавание речи для диктофона и аудио/видео. Подходит OpenAI Whisper или Groq (дешевле, см. `.env.example`).
+По умолчанию сайт работает на **Yandex Cloud**: конспекты пишет YandexGPT, голос распознаёт SpeechKit. Оплачивается российской картой. Нужны две переменные:
+- `YANDEX_API_KEY` — API-ключ сервисного аккаунта с ролями `ai.languageModels.user` и `ai.speechkit-stt.user`;
+- `YANDEX_FOLDER_ID` — идентификатор каталога.
 
-Без `STT_API_KEY` работает всё, кроме аудио.
+Можно переключиться на Claude (`AI_PROVIDER=claude` + `ANTHROPIC_API_KEY`), тогда модель сама читает PDF и фото. Распознавание речи можно перевести на Whisper (OpenAI/Groq), см. `.env.example`.
 
 ## Как устроено
 
 - Next.js 16 (App Router) + Tailwind, всё в одном приложении.
-- `src/app/api/summarize` — конспект (потоковый вывод), модель `claude-opus-5-5`. PDF и фото модель читает сама.
-- `src/app/api/transcribe` — аудио → текст через OpenAI-совместимый Whisper API (лимит файла 25 МБ).
+- `src/lib/ai.ts` — выбор нейросети; `yandex.ts` и `claude.ts` — сами вызовы.
+- `src/app/api/summarize` — конспект (потоковый вывод). PDF для YandexGPT переводится в текст на сервере.
+- Аудио и видео декодируются прямо в браузере (`src/lib/audio.ts`), режутся на фрагменты по 25 с и распознаются параллельно через `src/app/api/transcribe`. Ограничения на длину записи нет, только размер файла до 300 МБ.
 - `src/app/api/link` — текст со страницы, субтитры YouTube или PDF по ссылке.
 - `src/app/api/extract` — текст из .docx.
 - `src/app/api/flashcards`, `quiz` — карточки и тест в строгом JSON.
@@ -35,5 +36,4 @@ npm run dev                  # http://localhost:3000
 
 - Аккаунты и база данных (Supabase/Postgres), чтобы конспекты были доступны с любого устройства.
 - Оплата и лимиты (ЮKassa / Stripe).
-- Нарезка длинных аудио больше 25 МБ на части.
 - Экспорт карточек в Anki, интервальные повторения.

@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { YoutubeTranscript } from "youtube-transcript";
-import { errorResponse } from "@/lib/claude";
+import { errorResponse } from "@/lib/ai";
 
 export const maxDuration = 60;
 

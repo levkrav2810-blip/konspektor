@@ -5,11 +5,12 @@ import InputPanel, { type Material } from "@/components/InputPanel";
 import NoteView, { Spinner } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
 import { fileToBase64, loadNotes, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
 
 const TEXT_EXT = /\.(txt|md|srt|vtt|csv|json)$/i;
-const MAX_AUDIO_MB = 25;
+const MAX_MEDIA_MB = 300;
 
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -32,12 +33,14 @@ export default function Home() {
     persist(notes.map((x) => (x.id === n.id ? n : x)));
   }
 
-  async function transcribe(blob: Blob, name: string) {
-    if (blob.size > MAX_AUDIO_MB * 1024 * 1024) {
-      throw new Error(`Файл больше ${MAX_AUDIO_MB} МБ. Сожмите аудио или разделите запись на части.`);
+  async function transcribe(blob: Blob) {
+    if (blob.size > MAX_MEDIA_MB * 1024 * 1024) {
+      throw new Error(`Файл больше ${MAX_MEDIA_MB} МБ. Сохраните из видео только звук (mp3 или m4a) и загрузите его.`);
     }
+    setStage("Готовлю запись…");
+    const chunks = await audioToChunks(blob);
     setStage("Распознаю речь…");
-    const { text } = await postForm<{ text: string }>("/api/transcribe", blob, name);
+    const text = await transcribeChunks(chunks, (done, total) => setStage(`Распознаю речь… ${Math.round((done / total) * 100)}%`));
     if (!text) throw new Error("В записи не удалось распознать речь");
     return text;
   }
@@ -45,7 +48,7 @@ export default function Home() {
   async function prepare(m: Material): Promise<{ body: SummarizeBody; transcript?: string }> {
     if (m.kind === "text") return { body: { text: m.text } };
     if (m.kind === "audio") {
-      const transcript = await transcribe(m.blob, m.name);
+      const transcript = await transcribe(m.blob);
       return { body: { text: transcript }, transcript };
     }
     if (m.kind === "link") {
@@ -55,7 +58,7 @@ export default function Home() {
     }
     const f = m.file;
     if (f.type.startsWith("audio/") || f.type.startsWith("video/")) {
-      const transcript = await transcribe(f, f.name);
+      const transcript = await transcribe(f);
       return { body: { text: transcript }, transcript };
     }
     if (f.type === "application/pdf" || f.type.startsWith("image/")) {
@@ -155,7 +158,7 @@ export default function Home() {
               {!stage && !draft && (
                 <div className="mt-10 grid gap-4 sm:grid-cols-3">
                   {[
-                    ["🎙️", "Любой источник", "Диктофон, аудио и видео, PDF, Word, фото, статьи и YouTube."],
+                    ["🎙️", "Любой источник", "Диктофон, аудио и видео, PDF, Word, статьи и YouTube."],
                     ["🧠", "Умный конспект", "Структура, термины, определения и вопросы для самопроверки."],
                     ["🃏", "Учи, а не читай", "Флеш-карточки, тесты, шпаргалки, интеллект-карты и перевод."],
                   ].map(([icon, title, text]) => (

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { errorResponse, generateJson } from "@/lib/claude";
+import { errorResponse, generateJson } from "@/lib/ai";
 import { FLASHCARDS_SYSTEM } from "@/lib/prompts";
 
 export const maxDuration = 300;

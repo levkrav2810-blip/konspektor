@@ -22,7 +22,7 @@ export type UserContent = Anthropic.Beta.BetaContentBlockParam[];
  * Стримит текстовый ответ модели как обычный text/plain поток.
  * Ждёт первое событие, чтобы ошибки (ключ, лимиты) вернулись обычным JSON-ответом, а не оборванным потоком.
  */
-export async function streamText(system: string, content: UserContent, effort: "low" | "medium" | "high" = "medium") {
+export async function claudeStreamText(system: string, content: UserContent, effort: "low" | "medium" | "high" = "medium") {
   const stream = getClient().beta.messages.stream({
     model: MODEL,
     max_tokens: 64000,
@@ -62,7 +62,7 @@ export async function streamText(system: string, content: UserContent, effort: "
 }
 
 /** Запрос со строгой JSON-схемой: ответ гарантированно соответствует zod-схеме. */
-export async function generateJson<T extends z.ZodType>(system: string, prompt: string, schema: T): Promise<z.infer<T>> {
+export async function claudeGenerateJson<T extends z.ZodType>(system: string, prompt: string, schema: T): Promise<z.infer<T>> {
   const response = await getClient().beta.messages.parse({
     model: MODEL,
     max_tokens: 16000,
@@ -75,18 +75,4 @@ export async function generateJson<T extends z.ZodType>(system: string, prompt: 
     throw new Error("Модель не смогла сгенерировать ответ");
   }
   return response.parsed_output;
-}
-
-export function errorResponse(err: unknown, status = 500) {
-  let message = err instanceof Error ? err.message : String(err);
-  if (err instanceof Anthropic.AuthenticationError || /authentication method/i.test(message)) {
-    message = "Не задан или неверен ANTHROPIC_API_KEY в .env.local";
-  } else if (err instanceof Anthropic.RateLimitError) {
-    message = "Слишком много запросов, попробуйте через минуту";
-    status = 429;
-  } else if (err instanceof Anthropic.APIError && err.status) {
-    status = err.status >= 500 ? 502 : err.status;
-  }
-  console.error(err);
-  return Response.json({ error: message }, { status });
 }
