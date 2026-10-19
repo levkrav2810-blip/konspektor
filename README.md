@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Конспектор
 
-## Getting Started
+Сайт по образцу zachet.app: нейросеть превращает запись диктофона, аудио/видео, PDF, Word, фото, текст или ссылку (статья, YouTube, PDF) в чёткий структурированный конспект. Из конспекта одной кнопкой: флеш-карточки, тест с проверкой, шпаргалка, «объяснить проще», интеллект-карта, план ответа и перевод на любой язык.
 
-First, run the development server:
+## Запуск
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # вписать ключи
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Нужны два ключа:
+- `ANTHROPIC_API_KEY` — Claude (конспекты, карточки, тесты, перевод), https://console.anthropic.com/
+- `STT_API_KEY` — распознавание речи для диктофона и аудио/видео. Подходит OpenAI Whisper или Groq (дешевле, см. `.env.example`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Без `STT_API_KEY` работает всё, кроме аудио.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Как устроено
 
-## Learn More
+- Next.js 16 (App Router) + Tailwind, всё в одном приложении.
+- `src/app/api/summarize` — конспект (потоковый вывод), модель `claude-opus-5-5`. PDF и фото модель читает сама.
+- `src/app/api/transcribe` — аудио → текст через OpenAI-совместимый Whisper API (лимит файла 25 МБ).
+- `src/app/api/link` — текст со страницы, субтитры YouTube или PDF по ссылке.
+- `src/app/api/extract` — текст из .docx.
+- `src/app/api/flashcards`, `quiz` — карточки и тест в строгом JSON.
+- `src/app/api/transform` — перевод, шпаргалка, упрощение, интеллект-карта, план ответа.
+- Промпты: `src/lib/prompts.ts`. История конспектов хранится в браузере (localStorage).
 
-To learn more about Next.js, take a look at the following resources:
+## Деплой
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Проще всего Vercel: импортировать репозиторий, добавить переменные из `.env.example`. Для длинных лекций нужен тариф с таймаутом функций от 300 с.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Что дальше
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Аккаунты и база данных (Supabase/Postgres), чтобы конспекты были доступны с любого устройства.
+- Оплата и лимиты (ЮKassa / Stripe).
+- Нарезка длинных аудио больше 25 МБ на части.
+- Экспорт карточек в Anki, интервальные повторения.
