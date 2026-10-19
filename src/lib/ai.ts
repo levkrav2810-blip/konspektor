@@ -4,8 +4,8 @@ import type { z } from "zod";
 import { claudeGenerateJson, claudeStreamText, type UserContent } from "./claude";
 import { yandexGenerateJson, yandexStreamText } from "./yandex";
 
-// Какая нейросеть пишет конспекты: "yandex" (YandexGPT, оплата из России) или "claude".
-export const PROVIDER = process.env.AI_PROVIDER === "claude" ? "claude" : "yandex";
+// Какая нейросеть пишет конспекты: "claude" (по умолчанию) или "yandex" (YandexGPT, оплата российской картой).
+export const PROVIDER = process.env.AI_PROVIDER === "yandex" ? "yandex" : "claude";
 
 export type Material = {
   text?: string;

@@ -4,7 +4,7 @@ import { yandexRecognize } from "@/lib/yandex";
 export const maxDuration = 60;
 
 // Распознаёт один фрагмент речи: браузер режет запись на куски до 25 с в формате LPCM 16 кГц моно.
-// По умолчанию Yandex SpeechKit; STT_PROVIDER=openai — любой OpenAI-совместимый Whisper (OpenAI, Groq).
+// По умолчанию OpenAI-совместимый Whisper (OpenAI, Groq); STT_PROVIDER=yandex — Yandex SpeechKit.
 const SAMPLE_RATE = 16000;
 const MAX_BYTES = 1024 * 1024;
 
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     const pcm = await req.arrayBuffer();
     if (!pcm.byteLength) return errorResponse(new Error("Пустой фрагмент"), 400);
     if (pcm.byteLength > MAX_BYTES) return errorResponse(new Error("Фрагмент больше 1 МБ"), 413);
-    const text = process.env.STT_PROVIDER === "openai" ? await whisper(pcm) : await yandexRecognize(pcm);
+    const text = process.env.STT_PROVIDER === "yandex" ? await yandexRecognize(pcm) : await whisper(pcm);
     return Response.json({ text });
   } catch (err) {
     return errorResponse(err);

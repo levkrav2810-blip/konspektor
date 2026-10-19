@@ -68,7 +68,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
               ref={fileInput}
               type="file"
               hidden
-              accept="audio/*,video/*,.pdf,.docx,.txt,.md,.srt,.vtt"
+              accept="audio/*,video/*,.pdf,.docx,.txt,.md,.srt,.vtt,image/*"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
             <div className="text-4xl">📂</div>
@@ -77,7 +77,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
             ) : (
               <div className="font-medium">Перетащите файл сюда или нажмите, чтобы выбрать</div>
             )}
-            <div className="text-sm text-muted">Аудио и видео (mp3, m4a, wav, mp4…), PDF, Word, TXT</div>
+            <div className="text-sm text-muted">Аудио и видео (mp3, m4a, wav, mp4…), PDF, Word, TXT, фото слайда или страницы</div>
           </div>
         )}
 

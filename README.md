@@ -10,11 +10,11 @@ cp .env.example .env.local   # вписать ключи
 npm run dev                  # http://localhost:3000
 ```
 
-По умолчанию сайт работает на **Yandex Cloud**: конспекты пишет YandexGPT, голос распознаёт SpeechKit. Оплачивается российской картой. Нужны две переменные:
-- `YANDEX_API_KEY` — API-ключ сервисного аккаунта с ролями `ai.languageModels.user` и `ai.speechkit-stt.user`;
-- `YANDEX_FOLDER_ID` — идентификатор каталога.
+Нужны ключи (см. `.env.example`):
+- `ANTHROPIC_API_KEY` — Claude пишет конспекты, карточки, тесты и перевод, сам читает PDF и фото;
+- `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL` — распознавание речи через Whisper (Groq или OpenAI).
 
-Можно переключиться на Claude (`AI_PROVIDER=claude` + `ANTHROPIC_API_KEY`), тогда модель сама читает PDF и фото. Распознавание речи можно перевести на Whisper (OpenAI/Groq), см. `.env.example`.
+Запасной вариант с оплатой российской картой: Yandex Cloud (`AI_PROVIDER=yandex`, `STT_PROVIDER=yandex`, `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`). Тогда конспекты пишет YandexGPT, голос распознаёт SpeechKit, а фото не поддерживаются.
 
 ## Как устроено
 
