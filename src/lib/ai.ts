@@ -5,8 +5,9 @@ import { claudeGenerateJson, claudeStreamText, type UserContent } from "./claude
 import { SUMMARY_FINAL_SYSTEM, SUMMARY_PART_SYSTEM, SUMMARY_SYSTEM } from "./prompts";
 import { yandexGenerateJson, yandexStreamText } from "./yandex";
 
-// Какая нейросеть пишет конспекты: "claude" (по умолчанию) или "yandex" (YandexGPT, оплата российской картой).
-export const PROVIDER = process.env.AI_PROVIDER === "yandex" ? "yandex" : "claude";
+// Какая нейросеть пишет конспекты: "claude" (по умолчанию), "yandex" (Yandex AI Studio)
+// или "openai" (любой OpenAI-совместимый провайдер, например Cloud.ru с GLM-5.1).
+export const PROVIDER = process.env.AI_PROVIDER === "yandex" || process.env.AI_PROVIDER === "openai" ? process.env.AI_PROVIDER : "claude";
 
 export type Material = {
   text?: string;
@@ -37,7 +38,8 @@ export async function streamText(system: string, material: Material, task: strin
   return yandexStreamText(system, `${text}\n\n${task}`);
 }
 
-// YandexGPT видит ~32 тыс. токенов и пишет не больше 8 тыс., поэтому длинную лекцию
+// YandexGPT видит ~32 тыс. токенов и пишет не больше 8 тыс., а подробность любой модели падает
+// на очень длинном тексте, поэтому длинную лекцию
 // конспектируем по частям (параллельно), а в конце дописываем выводы и вопросы.
 const PART_CHARS = 12000;
 const PART_CONCURRENCY = 4;

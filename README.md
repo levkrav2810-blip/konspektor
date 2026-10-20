@@ -16,6 +16,8 @@ npm run dev                  # http://localhost:3000
 
 Запасной вариант с оплатой российской картой: Yandex Cloud (`AI_PROVIDER=yandex`, `STT_PROVIDER=yandex`, `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`). Тогда конспекты пишет YandexGPT, голос распознаёт SpeechKit, а фото не поддерживаются.
 
+Другая OpenAI-совместимая нейросеть (например, GLM-5.1 или DeepSeek V4 на Cloud.ru): `AI_PROVIDER=openai`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`. Распознавание голоса при этом можно оставить на SpeechKit.
+
 ## Как устроено
 
 - Next.js 16 (App Router) + Tailwind, всё в одном приложении.
