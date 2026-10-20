@@ -62,7 +62,8 @@ body {
 .md code { background: color-mix(in srgb, var(--accent) 10%, transparent); padding: 0.1rem 0.35rem; border-radius: 0.35rem; font-size: 0.9em; }
 .md pre { background: var(--background); border: 1px solid var(--line); padding: 1rem; border-radius: 0.75rem; overflow-x: auto; }
 .md pre code { background: none; padding: 0; }
-.md blockquote { border-left: 4px solid var(--accent); padding-left: 1rem; color: var(--muted); margin: 1rem 0; }
+.md blockquote { border-left: 4px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); padding: 0.6rem 1rem; border-radius: 0 0.75rem 0.75rem 0; margin: 1rem 0; }
+.md blockquote p { margin: 0.3rem 0; }
 .md table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.95em; display: block; overflow-x: auto; }
 .md th, .md td { border: 1px solid var(--line); padding: 0.5rem 0.75rem; text-align: left; }
 .md th { background: var(--background); font-weight: 600; }
