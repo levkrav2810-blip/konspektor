@@ -22,7 +22,7 @@ function snippet(note: Note, q: string) {
   return (start > 0 ? "…" : "") + text.slice(start, i + q.length + 90);
 }
 
-export default function NotesSearch({ notes, onOpen }: { notes: Note[]; onOpen: (id: string) => void }) {
+export default function NotesSearch({ notes, onOpen, onRemove }: { notes: Note[]; onOpen: (id: string) => void; onRemove: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
   if (notes.length === 0) return null;
@@ -54,11 +54,19 @@ export default function NotesSearch({ notes, onOpen }: { notes: Note[]; onOpen: 
       ) : (
         <ul className="mt-3 grid gap-3 sm:grid-cols-2">
           {shown.map((n) => (
-            <li key={n.id}>
+            <li key={n.id} className="group relative">
               <button type="button" onClick={() => onOpen(n.id)} className="card block h-full w-full p-4 text-left transition hover:border-accent">
-                <div className="truncate font-medium">{n.title}</div>
+                <div className="truncate pr-6 font-medium">{n.title}</div>
                 <div className="mt-0.5 text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")} · {n.source}</div>
                 <div className="mt-2 line-clamp-2 text-sm text-muted">{snippet(n, q)}</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => window.confirm(`Удалить конспект «${n.title}»?`) && onRemove(n.id)}
+                className="absolute right-2 top-2 rounded-md px-2 text-lg text-muted opacity-60 hover:text-red-500 group-hover:opacity-100 sm:opacity-0"
+                aria-label="Удалить конспект"
+              >
+                ×
               </button>
             </li>
           ))}

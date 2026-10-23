@@ -1,6 +1,16 @@
 @import "tailwindcss";
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* Тема: системная по умолчанию, в настройках можно выбрать светлую или тёмную (data-theme на <html>). */
+@custom-variant dark {
+  &:where([data-theme=dark], [data-theme=dark] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme=light]), :root:not([data-theme=light]) *) {
+      @slot;
+    }
+  }
+}
 
 :root {
   --background: #f7f7fb;
@@ -12,7 +22,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme=light]) {
     --background: #0e0e14;
     --surface: #17171f;
     --foreground: #ececf1;
@@ -20,6 +30,15 @@
     --line: #2a2a36;
     --accent: #8b7dff;
   }
+}
+
+:root[data-theme=dark] {
+  --background: #0e0e14;
+  --surface: #17171f;
+  --foreground: #ececf1;
+  --muted: #9a9aab;
+  --line: #2a2a36;
+  --accent: #8b7dff;
 }
 
 @theme inline {

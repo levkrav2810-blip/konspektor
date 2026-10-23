@@ -86,11 +86,19 @@ export function fileToBase64(file: Blob): Promise<string> {
   });
 }
 
-export function downloadText(filename: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+export function downloadText(filename: string, text: string, type = "text/markdown") {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Русское склонение: plural(3, "конспект", "конспекта", "конспектов") → «конспекта». */
+export function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
 }

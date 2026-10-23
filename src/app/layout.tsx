@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { THEME_BOOT_SCRIPT } from "@/lib/settings";
 
 export const metadata: Metadata = {
   title: "Конспектор — нейросеть для конспектов, карточек и тестов",
@@ -8,7 +9,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="ru" className="h-full antialiased">
+    <html lang="ru" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-full">{children}</body>
     </html>
   );

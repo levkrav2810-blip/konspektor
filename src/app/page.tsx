@@ -5,13 +5,24 @@ import InputPanel, { type Material } from "@/components/InputPanel";
 import NoteView, { Spinner } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
 import NotesSearch from "@/components/NotesSearch";
-import { fileToBase64, loadNotes, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import ProfileView from "@/components/ProfileView";
+import SettingsView from "@/components/SettingsView";
+import { applyTheme, DEFAULT_PROFILE, DEFAULT_SETTINGS, loadProfile, loadSettings, saveProfile, saveSettings, type Profile, type Settings } from "@/lib/settings";
+import { fileToBase64, loadNotes, plural, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
 
 const TEXT_EXT = /\.(txt|md|srt|vtt|csv|json)$/i;
 const MAX_MEDIA_MB = 300;
+
+type Page = "home" | "profile" | "settings";
+
+const NAV: [Page, string, string][] = [
+  ["home", "🏠", "Главная"],
+  ["profile", "👤", "Личный кабинет"],
+  ["settings", "⚙️", "Настройки"],
+];
 
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -20,10 +31,41 @@ export default function Home() {
   const [draft, setDraft] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [page, setPage] = useState<Page>("home");
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
 
-  // История хранится в localStorage, поэтому читаем её только в браузере после гидрации.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setNotes(loadNotes()), []);
+  // История и настройки хранятся в localStorage, поэтому читаем их только в браузере после гидрации.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setNotes(loadNotes());
+    setSettings(loadSettings());
+    setProfile(loadProfile());
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  function changeSettings(s: Settings) {
+    setSettings(s);
+    saveSettings(s);
+    applyTheme(s.theme);
+  }
+
+  function changeProfile(p: Profile) {
+    setProfile(p);
+    saveProfile(p);
+  }
+
+  function go(p: Page) {
+    setPage(p);
+    setCurrentId(null);
+    setMenuOpen(false);
+  }
+
+  function openNote(id: string) {
+    setPage("home");
+    setCurrentId(id);
+    setMenuOpen(false);
+  }
 
   function persist(next: Note[]) {
     setNotes(next);
@@ -82,7 +124,13 @@ export default function Home() {
     try {
       const { body, transcript } = await prepare(m);
       setStage("Пишу конспект…");
-      const summary = await postStream("/api/summarize", { ...body, source: m.source, wishes }, setDraft);
+      const allWishes = [settings.defaultWishes.trim(), wishes.trim()].filter(Boolean).join(". ");
+      const { language, detail, additions, answers } = settings;
+      const summary = await postStream(
+        "/api/summarize",
+        { ...body, source: m.source, wishes: allWishes, settings: { language, detail, additions, answers } },
+        setDraft,
+      );
       const note: Note = {
         id: crypto.randomUUID(),
         title: titleFromMarkdown(summary, m.source),
@@ -109,21 +157,31 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className={`no-print fixed inset-y-0 left-0 z-30 w-72 transform border-r border-line bg-surface p-4 transition md:static md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <button type="button" onClick={() => { setCurrentId(null); setMenuOpen(false); }} className="btn-primary mb-5 w-full">+ Новый конспект</button>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Мои конспекты</div>
-        {notes.length === 0 && <p className="text-sm text-muted">Здесь появятся ваши конспекты.</p>}
-        <ul className="flex flex-col gap-1">
-          {notes.map((n) => (
-            <li key={n.id} className={`group flex items-center rounded-lg ${n.id === currentId ? "bg-accent/10" : "hover:bg-foreground/5"}`}>
-              <button type="button" onClick={() => { setCurrentId(n.id); setMenuOpen(false); }} className="flex-1 truncate px-3 py-2 text-left text-sm">
-                {n.title}
-                <div className="text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")}</div>
+      <aside className={`no-print fixed inset-y-0 left-0 z-30 flex w-64 transform flex-col border-r border-line bg-surface p-4 transition md:sticky md:top-0 md:h-screen md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <button type="button" onClick={() => go("home")} className="btn-primary mb-5 w-full">+ Новый конспект</button>
+        <nav className="flex flex-col gap-1">
+          {NAV.map(([id, icon, label]) => {
+            const active = page === id && !(id === "home" && currentId);
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => go(id)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left font-medium transition ${active ? "bg-accent/10 text-accent" : "hover:bg-foreground/5"}`}
+              >
+                <span>{icon}</span>
+                {label}
               </button>
-              <button type="button" onClick={() => remove(n.id)} className="px-2 text-muted opacity-0 hover:text-red-500 group-hover:opacity-100" aria-label="Удалить">×</button>
-            </li>
-          ))}
-        </ul>
+            );
+          })}
+        </nav>
+        <button type="button" onClick={() => go("profile")} className="mt-auto flex items-center gap-3 rounded-lg border border-line p-3 text-left hover:border-accent/60">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white">{(profile.name.trim()[0] || "🙂").toUpperCase()}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">{profile.name.trim() || "Гость"}</span>
+            <span className="block text-xs text-muted">{notes.length} {plural(notes.length, "конспект", "конспекта", "конспектов")}</span>
+          </span>
+        </button>
       </aside>
       {menuOpen && <div className="fixed inset-0 z-20 bg-black/30 md:hidden" onClick={() => setMenuOpen(false)} />}
 
@@ -135,7 +193,9 @@ export default function Home() {
         </header>
 
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
-          {!current && (
+          {page === "settings" && <SettingsView settings={settings} onChange={changeSettings} />}
+          {page === "profile" && <ProfileView profile={profile} notes={notes} onProfile={changeProfile} onNotes={persist} onOpen={openNote} />}
+          {page === "home" && !current && (
             <>
               {!stage && !draft && (
                 <div className="mb-8 text-center">
@@ -149,7 +209,7 @@ export default function Home() {
               )}
               {!stage && <InputPanel busy={!!stage} onSubmit={handle} />}
               {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
-              {!stage && !draft && <NotesSearch notes={notes} onOpen={setCurrentId} />}
+              {!stage && !draft && <NotesSearch notes={notes} onOpen={openNote} onRemove={remove} />}
               {stage && !draft && <Spinner text={stage} />}
               {draft && (
                 <div className="card mt-2 p-6 sm:p-8">
@@ -174,7 +234,7 @@ export default function Home() {
               )}
             </>
           )}
-          {current && <NoteView key={current.id} note={current} onChange={updateNote} />}
+          {page === "home" && current && <NoteView key={current.id} note={current} onChange={updateNote} />}
         </div>
       </main>
     </div>
