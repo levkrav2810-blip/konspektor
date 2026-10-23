@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { downloadText, plural, type Note } from "@/lib/client";
-import { authFetch, fullName, type User } from "@/lib/user";
-
-type Member = Pick<User, "id" | "firstName" | "lastName">;
+import GroupPanel from "@/components/GroupPanel";
+import { fullName, type User } from "@/lib/user";
 
 export default function ProfileView({
   user,
@@ -22,14 +21,6 @@ export default function ProfileView({
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
-  const [members, setMembers] = useState<Member[] | null>(null);
-
-  useEffect(() => {
-    authFetch("/api/group")
-      .then((r) => r.json())
-      .then((d) => setMembers(d.members ?? null))
-      .catch(() => setMembers(null));
-  }, []);
 
   const cards = notes.reduce((s, n) => s + (n.flashcards?.length ?? 0), 0);
   const tests = notes.filter((n) => n.quiz?.length).length;
@@ -107,22 +98,7 @@ export default function ProfileView({
         </section>
       )}
 
-      {members && (
-        <section className="card mt-4 p-5 sm:p-6">
-          <h2 className="font-semibold">
-            Моя группа {user.group} <span className="text-muted">· {members.length} {plural(members.length, "участник", "участника", "участников")}</span>
-          </h2>
-          <ul className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-            {members.map((m, i) => (
-              <li key={m.id} className={`flex items-center gap-3 py-1.5 ${m.id === user.id ? "font-medium text-accent" : ""}`}>
-                <span className="w-6 text-right text-sm text-muted">{i + 1}.</span>
-                {m.lastName} {m.firstName}
-                {m.id === user.id && <span className="text-xs text-muted">это вы</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <GroupPanel me={user.id} />
 
       <section className="card mt-4 p-5 sm:p-6">
         <h2 className="font-semibold">Мои данные</h2>

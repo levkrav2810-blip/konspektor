@@ -1,9 +1,15 @@
-import { groupMembers, userFromRequest } from "@/lib/auth";
+import { groupActivity, userFromRequest } from "@/lib/auth";
 
-/** Список группы — только для вошедших и только имена. */
+/** Список группы и кто когда заходил — только для администратора. */
 export async function GET(req: Request) {
   const me = userFromRequest(req);
   if (!me) return Response.json({ error: "Войдите на сайт заново" }, { status: 401 });
-  const members = groupMembers().map(({ id, firstName, lastName }) => ({ id, firstName, lastName }));
-  return Response.json({ group: me.group, members });
+  if (!me.admin) return Response.json({ error: "Список группы видит только администратор" }, { status: 403 });
+  try {
+    const data = await groupActivity();
+    return Response.json(Array.isArray(data) ? { group: me.group, tracking: true, members: data } : { group: me.group, tracking: false, members: data.members });
+  } catch (err) {
+    console.error(err);
+    return Response.json({ error: "Не удалось загрузить список группы" }, { status: 500 });
+  }
 }

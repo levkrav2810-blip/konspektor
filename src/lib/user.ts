@@ -1,6 +1,6 @@
 "use client";
 
-export type User = { id: string; firstName: string; lastName: string; group: string };
+export type User = { id: string; firstName: string; lastName: string; group: string; admin?: boolean };
 export type Session = { user: User; token: string };
 
 const KEY = "konspektor.user.v2";

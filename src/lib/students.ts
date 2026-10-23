@@ -35,3 +35,6 @@ export const STUDENTS: Student[] = [
   { login: "darya.yankova", firstName: "Дарья", lastName: "Янькова", salt: "5b7b2a8f7d88d114cdcae189bcc390dd", hash: "430411ae7ae758bf7137f5872329cb5c12e5a645d632942e6f3339253e24a56d" },
   { login: "sergey.yatseyko", firstName: "Сергей", lastName: "Яцейко", salt: "aa6640e73d55b9c397b14e32f60a52a2", hash: "d6349375ad4f54c75a88f3e6825d99341d4cf7f752d8ef8549cad76c95ce7df6" },
 ];
+
+/** Кто видит список группы и отметки о входах. */
+export const ADMINS = ["lev.kravchenko"];
