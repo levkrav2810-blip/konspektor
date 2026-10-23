@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import * as cheerio from "cheerio";
 import { YoutubeTranscript } from "youtube-transcript";
 import { errorResponse } from "@/lib/ai";
@@ -27,6 +28,8 @@ function isPrivateHost(host: string) {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireUser(req);
+  if (denied) return denied;
   try {
     const { url: raw } = (await req.json()) as { url?: string };
     let url: URL;

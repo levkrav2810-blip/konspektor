@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import { errorResponse } from "@/lib/ai";
 import { yandexRecognize } from "@/lib/yandex";
 
@@ -42,6 +43,8 @@ async function whisper(pcm: ArrayBuffer) {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireUser(req);
+  if (denied) return denied;
   try {
     const pcm = await req.arrayBuffer();
     if (!pcm.byteLength) return errorResponse(new Error("Пустой фрагмент"), 400);

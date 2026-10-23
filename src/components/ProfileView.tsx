@@ -1,32 +1,42 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { downloadText, plural, type Note } from "@/lib/client";
-import type { Profile } from "@/lib/settings";
+import { authFetch, fullName, type User } from "@/lib/user";
+
+type Member = Pick<User, "id" | "firstName" | "lastName">;
 
 export default function ProfileView({
-  profile,
+  user,
   notes,
-  onProfile,
+  onLogout,
   onNotes,
   onOpen,
 }: {
-  profile: Profile;
+  user: User;
   notes: Note[];
-  onProfile: (p: Profile) => void;
+  onLogout: () => void;
   onNotes: (n: Note[]) => void;
   onOpen: (id: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
-  const set = (key: keyof Profile, value: string) => onProfile({ ...profile, [key]: value });
+  // null — список не хранится на сервере, тогда блок группы не показываем
+  const [members, setMembers] = useState<Member[] | null>(null);
+
+  useEffect(() => {
+    authFetch("/api/group")
+      .then((r) => r.json())
+      .then((d) => setMembers(d.shared ? d.members : null))
+      .catch(() => setMembers(null));
+  }, []);
 
   const cards = notes.reduce((s, n) => s + (n.flashcards?.length ?? 0), 0);
   const tests = notes.filter((n) => n.quiz?.length).length;
   const weekAgo = now - 7 * 864e5;
   const thisWeek = notes.filter((n) => n.createdAt > weekAgo).length;
-  const initial = (profile.name.trim()[0] || "🙂").toUpperCase();
+  const initial = (user.firstName[0] + user.lastName[0]).toUpperCase();
 
   const stats: [number, string][] = [
     [notes.length, plural(notes.length, "конспект", "конспекта", "конспектов")],
@@ -36,7 +46,7 @@ export default function ProfileView({
   ];
 
   function exportAll() {
-    downloadText(`konspektor-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ profile, notes }, null, 2), "application/json");
+    downloadText(`konspektor-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ user: { firstName: user.firstName, lastName: user.lastName, group: user.group }, notes }, null, 2), "application/json");
   }
 
   async function importFile(file: File) {
@@ -64,22 +74,13 @@ export default function ProfileView({
     <div>
       <h1 className="text-2xl font-bold sm:text-3xl">👤 Личный кабинет</h1>
 
-      <section className="card mt-6 flex flex-col gap-5 p-5 sm:flex-row sm:items-start sm:p-6">
+      <section className="card mt-6 flex flex-wrap items-center gap-4 p-5 sm:p-6">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-accent text-2xl font-bold text-white">{initial}</div>
-        <div className="grid flex-1 gap-3 sm:grid-cols-3">
-          <label className="text-sm">
-            <span className="text-muted">Имя</span>
-            <input value={profile.name} onChange={(e) => set("name", e.target.value)} placeholder="Как к вам обращаться" className="input mt-1 py-2.5" />
-          </label>
-          <label className="text-sm">
-            <span className="text-muted">Где учитесь</span>
-            <input value={profile.study} onChange={(e) => set("study", e.target.value)} placeholder="Например, МГУ, юрфак" className="input mt-1 py-2.5" />
-          </label>
-          <label className="text-sm">
-            <span className="text-muted">Курс или класс</span>
-            <input value={profile.course} onChange={(e) => set("course", e.target.value)} placeholder="1 курс" className="input mt-1 py-2.5" />
-          </label>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xl font-semibold">{fullName(user)}</div>
+          <div className="mt-0.5 text-muted">Группа {user.group}</div>
         </div>
+        <button type="button" onClick={() => window.confirm("Выйти? Конспекты останутся в этом браузере.") && onLogout()} className="btn-secondary">Выйти</button>
       </section>
 
       <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -101,6 +102,23 @@ export default function ProfileView({
                   <span className="truncate">{n.title}</span>
                   <span className="shrink-0 text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")}</span>
                 </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {members && (
+        <section className="card mt-4 p-5 sm:p-6">
+          <h2 className="font-semibold">
+            Моя группа {user.group} <span className="text-muted">· {members.length} {plural(members.length, "участник", "участника", "участников")}</span>
+          </h2>
+          <ul className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            {members.map((m, i) => (
+              <li key={m.id} className={`flex items-center gap-3 py-1.5 ${m.id === user.id ? "font-medium text-accent" : ""}`}>
+                <span className="w-6 text-right text-sm text-muted">{i + 1}.</span>
+                {m.lastName} {m.firstName}
+                {m.id === user.id && <span className="text-xs text-muted">это вы</span>}
               </li>
             ))}
           </ul>

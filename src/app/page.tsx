@@ -7,7 +7,9 @@ import Markdown from "@/components/Markdown";
 import NotesSearch from "@/components/NotesSearch";
 import ProfileView from "@/components/ProfileView";
 import SettingsView from "@/components/SettingsView";
-import { applyTheme, DEFAULT_PROFILE, DEFAULT_SETTINGS, loadProfile, loadSettings, saveProfile, saveSettings, type Profile, type Settings } from "@/lib/settings";
+import RegisterView from "@/components/RegisterView";
+import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
+import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
 import { fileToBase64, loadNotes, plural, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
@@ -33,15 +35,19 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
+  // undefined — ещё не прочитали localStorage, null — нужно зарегистрироваться
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   // История и настройки хранятся в localStorage, поэтому читаем их только в браузере после гидрации.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setNotes(loadNotes());
     setSettings(loadSettings());
-    setProfile(loadProfile());
+    setSession(loadSession());
     /* eslint-enable react-hooks/set-state-in-effect */
+    const logout = () => setSession(null);
+    window.addEventListener(LOGOUT_EVENT, logout);
+    return () => window.removeEventListener(LOGOUT_EVENT, logout);
   }, []);
 
   function changeSettings(s: Settings) {
@@ -50,9 +56,11 @@ export default function Home() {
     applyTheme(s.theme);
   }
 
-  function changeProfile(p: Profile) {
-    setProfile(p);
-    saveProfile(p);
+  function login(s: Session | null) {
+    saveSession(s);
+    setSession(s);
+    setPage("home");
+    setCurrentId(null);
   }
 
   function go(p: Page) {
@@ -155,6 +163,10 @@ export default function Home() {
 
   const current = notes.find((n) => n.id === currentId) || null;
 
+  if (session === undefined) return null;
+  if (!session) return <RegisterView onDone={login} />;
+  const { user } = session;
+
   return (
     <div className="flex min-h-screen">
       <aside className={`no-print fixed inset-y-0 left-0 z-30 flex w-64 transform flex-col border-r border-line bg-surface p-4 transition md:sticky md:top-0 md:h-screen md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
@@ -176,10 +188,10 @@ export default function Home() {
           })}
         </nav>
         <button type="button" onClick={() => go("profile")} className="mt-auto flex items-center gap-3 rounded-lg border border-line p-3 text-left hover:border-accent/60">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white">{(profile.name.trim()[0] || "🙂").toUpperCase()}</span>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white">{user.firstName[0].toUpperCase()}</span>
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{profile.name.trim() || "Гость"}</span>
-            <span className="block text-xs text-muted">{notes.length} {plural(notes.length, "конспект", "конспекта", "конспектов")}</span>
+            <span className="block truncate text-sm font-medium">{fullName(user)}</span>
+            <span className="block truncate text-xs text-muted">{user.group} · {notes.length} {plural(notes.length, "конспект", "конспекта", "конспектов")}</span>
           </span>
         </button>
       </aside>
@@ -194,7 +206,7 @@ export default function Home() {
 
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
           {page === "settings" && <SettingsView settings={settings} onChange={changeSettings} />}
-          {page === "profile" && <ProfileView profile={profile} notes={notes} onProfile={changeProfile} onNotes={persist} onOpen={openNote} />}
+          {page === "profile" && <ProfileView user={user} notes={notes} onLogout={() => login(null)} onNotes={persist} onOpen={openNote} />}
           {page === "home" && !current && (
             <>
               {!stage && !draft && (

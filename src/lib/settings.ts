@@ -16,12 +16,6 @@ export type Settings = {
   theme: Theme;
 };
 
-export type Profile = {
-  name: string;
-  study: string;
-  course: string;
-};
-
 export const DEFAULT_SETTINGS: Settings = {
   language: "",
   detail: "normal",
@@ -31,10 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
 };
 
-export const DEFAULT_PROFILE: Profile = { name: "", study: "", course: "" };
-
 const SETTINGS_KEY = "konspektor.settings.v1";
-const PROFILE_KEY = "konspektor.profile.v1";
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -54,8 +45,6 @@ function save(key: string, value: unknown) {
 
 export const loadSettings = () => load(SETTINGS_KEY, DEFAULT_SETTINGS);
 export const saveSettings = (s: Settings) => save(SETTINGS_KEY, s);
-export const loadProfile = () => load(PROFILE_KEY, DEFAULT_PROFILE);
-export const saveProfile = (p: Profile) => save(PROFILE_KEY, p);
 
 export function applyTheme(theme: Theme) {
   if (theme === "system") document.documentElement.removeAttribute("data-theme");

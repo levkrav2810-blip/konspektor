@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import { errorResponse, streamSummary, type Material } from "@/lib/ai";
 
 export const maxDuration = 300;
@@ -28,6 +29,8 @@ function settingsToTask(s: Body["settings"] = {}) {
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
 export async function POST(req: Request) {
+  const denied = await requireUser(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as Body;
     const material: Material = {};

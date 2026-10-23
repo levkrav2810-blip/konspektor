@@ -1,9 +1,12 @@
+import { requireUser } from "@/lib/auth";
 import { errorResponse, streamText } from "@/lib/ai";
 import { TRANSFORMS } from "@/lib/prompts";
 
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
+  const denied = await requireUser(req);
+  if (denied) return denied;
   try {
     const { summary, kind, language } = (await req.json()) as { summary: string; kind: string; language?: string };
     const t = TRANSFORMS[kind];

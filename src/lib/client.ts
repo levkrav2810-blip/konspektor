@@ -1,5 +1,7 @@
 "use client";
 
+import { authFetch } from "@/lib/user";
+
 export type Flashcard = { front: string; back: string };
 export type QuizQuestion = { question: string; options: string[]; correctIndex: number; explanation: string };
 
@@ -52,7 +54,7 @@ async function readError(res: Response) {
 }
 
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await authFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -60,14 +62,14 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
 export async function postForm<T>(url: string, file: Blob, name: string): Promise<T> {
   const form = new FormData();
   form.append("file", file, name);
-  const res = await fetch(url, { method: "POST", body: form });
+  const res = await authFetch(url, { method: "POST", body: form });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
 /** POST и чтение потокового текстового ответа; onChunk получает весь накопленный текст. */
 export async function postStream(url: string, body: unknown, onChunk: (text: string) => void): Promise<string> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await authFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok || !res.body) throw new Error(await readError(res));
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

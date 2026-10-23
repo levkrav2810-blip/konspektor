@@ -1,5 +1,7 @@
 "use client";
 
+import { authFetch } from "@/lib/user";
+
 const RATE = 16000;
 const CHUNK_SECONDS = 25;
 
@@ -60,7 +62,7 @@ export async function transcribeChunks(chunks: ArrayBuffer[], onProgress: (done:
   async function worker() {
     while (next < chunks.length) {
       const i = next++;
-      const res = await fetch("/api/transcribe", { method: "POST", body: chunks[i] });
+      const res = await authFetch("/api/transcribe", { method: "POST", body: chunks[i] });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Ошибка распознавания ${res.status}`);
       results[i] = data.text || "";

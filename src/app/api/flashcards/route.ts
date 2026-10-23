@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import { z } from "zod";
 import { errorResponse, generateJson } from "@/lib/ai";
 import { FLASHCARDS_SYSTEM } from "@/lib/prompts";
@@ -9,6 +10,8 @@ const Schema = z.object({
 });
 
 export async function POST(req: Request) {
+  const denied = await requireUser(req);
+  if (denied) return denied;
   try {
     const { summary, count = 15 } = (await req.json()) as { summary: string; count?: number };
     const data = await generateJson(
