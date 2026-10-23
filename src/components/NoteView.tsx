@@ -22,14 +22,35 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
   const [loading, setLoading] = useState<string | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState("English");
+  const [translating, setTranslating] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Конспект на выбранном языке; карточки, тест и остальное делаются из него же.
+  const lang = note.lang || "";
+  const summary = (lang && note.translations?.[lang]) || note.summary;
+
+  /** Переключает язык конспекта сразу: готовый перевод показывается мгновенно, новый пишется на глазах. */
+  async function changeLanguage(next: string) {
+    setView("summary");
+    if (!next || note.translations?.[next]) {
+      onChange({ ...note, lang: next });
+      return;
+    }
+    setTranslating(next);
+    setStreaming("");
+    await run("translate", async () => {
+      const content = await postStream("/api/transform", { summary: note.summary, kind: "translate", language: next }, setStreaming);
+      onChange({ ...note, lang: next, translations: { ...note.translations, [next]: content } });
+    });
+    setStreaming(null);
+    setTranslating(null);
+  }
 
   async function makeCards() {
     setView("cards");
     if (note.flashcards?.length) return;
     await run("cards", async () => {
-      const { cards } = await postJson<{ cards: Flashcard[] }>("/api/flashcards", { summary: note.summary });
+      const { cards } = await postJson<{ cards: Flashcard[] }>("/api/flashcards", { summary });
       onChange({ ...note, flashcards: cards });
     });
   }
@@ -38,7 +59,7 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
     setView("quiz");
     if (note.quiz?.length && !force) return;
     await run("quiz", async () => {
-      const { questions } = await postJson<{ questions: QuizQuestion[] }>("/api/quiz", { summary: note.summary });
+      const { questions } = await postJson<{ questions: QuizQuestion[] }>("/api/quiz", { summary });
       onChange({ ...note, quiz: questions });
     });
   }
@@ -47,7 +68,7 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
     const id = `${kind}-${crypto.randomUUID()}`;
     setView(id);
     await run(id, async () => {
-      const content = await postStream("/api/transform", { summary: note.summary, kind, language }, setStreaming);
+      const content = await postStream("/api/transform", { summary, kind }, setStreaming);
       onChange({ ...note, extras: [...(note.extras || []), { id, label, content }] });
     });
     setStreaming(null);
@@ -66,7 +87,7 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
   }
 
   const extra = note.extras?.find((x) => x.id === view);
-  const currentText = view === "summary" ? note.summary : view === "transcript" ? note.transcript || "" : extra?.content || "";
+  const currentText = view === "summary" ? summary : view === "transcript" ? note.transcript || "" : extra?.content || "";
 
   async function copy() {
     await navigator.clipboard.writeText(currentText);
@@ -91,12 +112,19 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
         {ACTIONS.map((a) => (
           <button key={a.id} type="button" onClick={() => transform(a.id, a.label)} disabled={!!loading} className="btn-chip">{a.label}</button>
         ))}
-        <div className="flex items-center gap-1.5">
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} className="input !w-auto !py-1.5 text-sm">
-            {LANGUAGES.map((l) => <option key={l}>{l}</option>)}
+        <label className="ml-auto flex items-center gap-1.5 text-sm text-muted">
+          🌍
+          <select
+            value={translating ?? lang}
+            onChange={(e) => changeLanguage(e.target.value)}
+            disabled={!!loading}
+            aria-label="Язык конспекта"
+            className="input !w-auto !py-1.5 text-sm text-foreground"
+          >
+            <option value="">Язык оригинала</option>
+            {LANGUAGES.map((l) => <option key={l} value={l}>{l}{note.translations?.[l] ? " ✓" : ""}</option>)}
           </select>
-          <button type="button" onClick={() => transform("translate", `🌍 ${language}`)} disabled={!!loading} className="btn-chip">Перевести</button>
-        </div>
+        </label>
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b border-line">
@@ -115,7 +143,13 @@ export default function NoteView({ note, onChange }: { note: Note; onChange: (n:
       {error && <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
 
       <div className="min-h-[300px]">
-        {(view === "summary" || view === "transcript" || extra) && (
+        {view === "summary" && translating && (
+          <div className="card p-6 sm:p-8">
+            <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />Перевожу на {translating}…</div>
+            {streaming ? <Markdown>{streaming}</Markdown> : <p className="text-muted">Начинаю перевод…</p>}
+          </div>
+        )}
+        {((view === "summary" && !translating) || view === "transcript" || extra) && (
           <div className="card p-6 sm:p-8">
             <div className="mb-4 flex justify-end gap-2">
               <button type="button" onClick={copy} className="btn-ghost">{copied ? "Скопировано ✓" : "Копировать"}</button>

@@ -13,6 +13,10 @@ export type Note = {
   flashcards?: Flashcard[];
   quiz?: QuizQuestion[];
   extras?: { id: string; label: string; content: string }[];
+  /** Переводы конспекта: язык → текст. */
+  translations?: Record<string, string>;
+  /** Язык, на котором конспект сейчас показан; пусто — оригинал. */
+  lang?: string;
 };
 
 const KEY = "konspektor.notes.v1";
