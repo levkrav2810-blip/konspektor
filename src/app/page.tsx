@@ -7,7 +7,7 @@ import Markdown from "@/components/Markdown";
 import NotesSearch from "@/components/NotesSearch";
 import ProfileView from "@/components/ProfileView";
 import SettingsView from "@/components/SettingsView";
-import RegisterView from "@/components/RegisterView";
+import LoginView from "@/components/LoginView";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
 import { fileToBase64, loadNotes, plural, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
@@ -35,7 +35,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  // undefined — ещё не прочитали localStorage, null — нужно зарегистрироваться
+  // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   // История и настройки хранятся в localStorage, поэтому читаем их только в браузере после гидрации.
@@ -164,7 +164,7 @@ export default function Home() {
   const current = notes.find((n) => n.id === currentId) || null;
 
   if (session === undefined) return null;
-  if (!session) return <RegisterView onDone={login} />;
+  if (!session) return <LoginView onDone={login} />;
   const { user } = session;
 
   return (

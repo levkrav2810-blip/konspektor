@@ -22,13 +22,12 @@ export default function ProfileView({
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
-  // null — список не хранится на сервере, тогда блок группы не показываем
   const [members, setMembers] = useState<Member[] | null>(null);
 
   useEffect(() => {
     authFetch("/api/group")
       .then((r) => r.json())
-      .then((d) => setMembers(d.shared ? d.members : null))
+      .then((d) => setMembers(d.members ?? null))
       .catch(() => setMembers(null));
   }, []);
 

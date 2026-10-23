@@ -1,10 +1,10 @@
 "use client";
 
-export type User = { id: string; firstName: string; lastName: string; group: string; createdAt: number };
+export type User = { id: string; firstName: string; lastName: string; group: string };
 export type Session = { user: User; token: string };
 
-const KEY = "konspektor.user.v1";
-/** Событие, по которому страница снова показывает регистрацию: сервер не узнал токен. */
+const KEY = "konspektor.user.v2";
+/** Событие, по которому страница снова показывает вход: сервер не узнал токен. */
 export const LOGOUT_EVENT = "konspektor:logout";
 
 export function loadSession(): Session | null {
@@ -30,7 +30,7 @@ export function authHeaders(): Record<string, string> {
   return s ? { "x-user-token": s.token } : {};
 }
 
-/** fetch с токеном входа; при 401 разлогинивает, чтобы человек зарегистрировался заново. */
+/** fetch с токеном входа; при 401 разлогинивает, чтобы человек вошёл заново. */
 export async function authFetch(url: string, init: RequestInit = {}) {
   const res = await fetch(url, { ...init, headers: { ...init.headers, ...authHeaders() } });
   if (res.status === 401) {
