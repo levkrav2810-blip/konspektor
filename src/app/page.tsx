@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import InputPanel, { type Material } from "@/components/InputPanel";
 import NoteView, { Spinner } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
+import NotesSearch from "@/components/NotesSearch";
 import { fileToBase64, loadNotes, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
@@ -148,6 +149,7 @@ export default function Home() {
               )}
               {!stage && <InputPanel busy={!!stage} onSubmit={handle} />}
               {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
+              {!stage && !draft && <NotesSearch notes={notes} onOpen={setCurrentId} />}
               {stage && !draft && <Spinner text={stage} />}
               {draft && (
                 <div className="card mt-2 p-6 sm:p-8">
