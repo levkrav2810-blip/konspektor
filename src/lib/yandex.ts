@@ -140,6 +140,8 @@ export async function yandexRecognize(pcm: ArrayBuffer) {
     method: "POST",
     headers: { Authorization: `Api-Key ${apiKey}` },
     body: pcm,
+    // зависший запрос лучше оборвать и повторить, чем ждать таймаута Vercel (504)
+    signal: AbortSignal.timeout(25_000),
   });
   if (!res.ok) {
     const text = await res.text();

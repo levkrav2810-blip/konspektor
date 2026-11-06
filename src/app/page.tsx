@@ -50,6 +50,7 @@ export default function Home() {
   const [createTab, setCreateTab] = useState<Tab | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [adding, setAdding] = useState<Set<string> | null>(null);
+  const [retry, setRetry] = useState<{ m: Material; wishes: string; transcript: string } | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -288,13 +289,17 @@ export default function Home() {
     throw new Error("Этот формат пока не поддерживается. Попробуйте PDF, Word, TXT, аудио или видео.");
   }
 
-  async function handle(m: Material, wishes: string) {
+  async function handle(m: Material, wishes: string, known?: { transcript: string }) {
     const subjectForNew = page === "subject" ? subjectId : null;
     setError(null);
+    setRetry(null);
     setDraft("");
     setCurrentId(null);
+    let transcript: string | undefined = known?.transcript;
     try {
-      const { body, transcript } = await prepare(m);
+      const prepared = known ? { body: { text: known.transcript } as SummarizeBody, transcript: known.transcript } : await prepare(m);
+      const { body } = prepared;
+      transcript = prepared.transcript;
       setStage("Пишу конспект…");
       const allWishes = [settings.defaultWishes.trim(), wishes.trim()].filter(Boolean).join(". ");
       const { language, detail, additions, answers } = settings;
@@ -318,6 +323,8 @@ export default function Home() {
       setDraft("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // запись уже распознана — повтор не должен заново грузить полтора часа звука
+      if (transcript) setRetry({ m, wishes, transcript });
     } finally {
       setStage(null);
     }
@@ -369,7 +376,16 @@ export default function Home() {
           <InputPanel key={createTab} tab={createTab} busy={!!stage} onSubmit={handle} />
         </div>
       )}
-      {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
+      {error && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">
+          <span className="flex-1">{error}</span>
+          {retry && !stage && (
+            <button type="button" onClick={() => handle(retry.m, retry.wishes, { transcript: retry.transcript })} className="btn-primary !py-2 text-sm">
+              Повторить (запись уже распознана)
+            </button>
+          )}
+        </div>
+      )}
       {stage && !draft && <div className="card mt-2"><Spinner text={stage} /></div>}
       {draft && (
         <div className="card mt-2 p-4 sm:p-8">

@@ -5,7 +5,8 @@ import { authFetch } from "@/lib/user";
 const RATE = 16000;
 const CHUNK_SECONDS = 25;
 // сколько фрагментов распознаём одновременно: длинная лекция — это сотни фрагментов
-const PARALLEL = 8;
+const PARALLEL = 6;
+const RETRIES = 3;
 
 /**
  * Декодирует любую запись или видео, которое умеет браузер, в моно LPCM 16 кГц
@@ -56,21 +57,57 @@ function resample(input: Float32Array, from: number, to: number) {
   return out;
 }
 
-/** Отправляет фрагменты на распознавание по несколько параллельно, сохраняя порядок. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Распознаёт один фрагмент; временные сбои (таймаут, перегрузка, обрыв сети) повторяет с паузой. */
+async function recognize(chunk: ArrayBuffer): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    let status = 0;
+    let message = "";
+    try {
+      const res = await authFetch("/api/transcribe", { method: "POST", body: chunk });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data.text || "";
+      status = res.status;
+      message = data.error || `Ошибка распознавания ${res.status}`;
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e); // обрыв сети
+    }
+    // неверный ключ, вход или слишком большой кусок повтор не исправит
+    const permanent = status === 400 || status === 401 || status === 403 || status === 413;
+    if (permanent || attempt >= RETRIES) throw Object.assign(new Error(message), { permanent });
+    await sleep(1500 * 2 ** attempt);
+  }
+}
+
+/**
+ * Отправляет фрагменты на распознавание по несколько параллельно, сохраняя порядок.
+ * Если отдельные фрагменты так и не распознались, пропускает их (до 5% записи), чтобы
+ * один сбой не перечёркивал полтора часа работы.
+ */
 export async function transcribeChunks(chunks: ArrayBuffer[], onProgress: (done: number, total: number) => void) {
   const results: string[] = new Array(chunks.length).fill("");
   let next = 0;
   let done = 0;
+  let failed = 0;
+  let fatal: Error | null = null;
+  const maxSkipped = Math.max(1, Math.floor(chunks.length * 0.05));
   async function worker() {
-    while (next < chunks.length) {
+    while (next < chunks.length && !fatal) {
       const i = next++;
-      const res = await authFetch("/api/transcribe", { method: "POST", body: chunks[i] });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Ошибка распознавания ${res.status}`);
-      results[i] = data.text || "";
-      onProgress(++done, chunks.length);
+      try {
+        results[i] = await recognize(chunks[i]);
+      } catch (e) {
+        const err = e as Error & { permanent?: boolean };
+        if (err.permanent || ++failed > maxSkipped) {
+          fatal = err;
+          return;
+        }
+      }
+      if (!fatal) onProgress(++done, chunks.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(PARALLEL, chunks.length) }, worker));
+  if (fatal) throw fatal;
   return results.join(" ").replace(/\s+/g, " ").trim();
 }
