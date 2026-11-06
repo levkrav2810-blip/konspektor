@@ -149,6 +149,7 @@ export default function Home() {
       };
       persist([note, ...notes]);
       setCurrentId(note.id);
+      setDraft("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

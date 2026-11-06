@@ -12,9 +12,8 @@ const DETAILS: [Detail, string, string][] = [
 ];
 
 const THEMES: [Theme, string][] = [
-  ["system", "Как в системе"],
+  ["dark", "Сине-чёрная"],
   ["light", "Светлая"],
-  ["dark", "Тёмная"],
 ];
 
 function Row({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {

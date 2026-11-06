@@ -1,44 +1,24 @@
 @import "tailwindcss";
 
-/* Тема: системная по умолчанию, в настройках можно выбрать светлую или тёмную (data-theme на <html>). */
-@custom-variant dark {
-  &:where([data-theme=dark], [data-theme=dark] *) {
-    @slot;
-  }
-  @media (prefers-color-scheme: dark) {
-    &:where(:root:not([data-theme=light]), :root:not([data-theme=light]) *) {
-      @slot;
-    }
-  }
-}
+/* Тема: сине-чёрная по умолчанию, в настройках можно включить светлую (data-theme="light" на <html>). */
+@custom-variant dark (&:where(:root:not([data-theme=light]), :root:not([data-theme=light]) *));
 
 :root {
-  --background: #f7f7fb;
+  --background: #05070d;
+  --surface: #0c111c;
+  --foreground: #e8edf7;
+  --muted: #8b97ad;
+  --line: #1b2436;
+  --accent: #3b7bff;
+}
+
+:root[data-theme=light] {
+  --background: #f4f7fd;
   --surface: #ffffff;
-  --foreground: #16161d;
-  --muted: #6b6b7b;
-  --line: #e6e6ef;
-  --accent: #5b4bff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme=light]) {
-    --background: #0e0e14;
-    --surface: #17171f;
-    --foreground: #ececf1;
-    --muted: #9a9aab;
-    --line: #2a2a36;
-    --accent: #8b7dff;
-  }
-}
-
-:root[data-theme=dark] {
-  --background: #0e0e14;
-  --surface: #17171f;
-  --foreground: #ececf1;
-  --muted: #9a9aab;
-  --line: #2a2a36;
-  --accent: #8b7dff;
+  --foreground: #0b1220;
+  --muted: #5b6780;
+  --line: #dde5f2;
+  --accent: #1d4ed8;
 }
 
 @theme inline {

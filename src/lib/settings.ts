@@ -1,7 +1,7 @@
 "use client";
 
 export type Detail = "short" | "normal" | "deep";
-export type Theme = "system" | "light" | "dark";
+export type Theme = "dark" | "light";
 
 export type Settings = {
   /** Язык конспекта; пусто — как в материале. */
@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
   additions: true,
   answers: true,
   defaultWishes: "",
-  theme: "system",
+  theme: "dark",
 };
 
 const SETTINGS_KEY = "konspektor.settings.v1";
@@ -43,13 +43,17 @@ function save(key: string, value: unknown) {
   }
 }
 
-export const loadSettings = () => load(SETTINGS_KEY, DEFAULT_SETTINGS);
+export function loadSettings(): Settings {
+  const s = load(SETTINGS_KEY, DEFAULT_SETTINGS);
+  // раньше была тема «как в системе» — теперь по умолчанию сине-чёрная
+  return s.theme === "light" ? s : { ...s, theme: "dark" };
+}
 export const saveSettings = (s: Settings) => save(SETTINGS_KEY, s);
 
 export function applyTheme(theme: Theme) {
-  if (theme === "system") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.setAttribute("data-theme", theme);
+  if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
 }
 
 /** Скрипт для <head>: ставит тему до первой отрисовки, чтобы не мигало. */
-export const THEME_BOOT_SCRIPT = `try{var t=JSON.parse(localStorage.getItem("${SETTINGS_KEY}")||"{}").theme;if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
+export const THEME_BOOT_SCRIPT = `try{var t=JSON.parse(localStorage.getItem("${SETTINGS_KEY}")||"{}").theme;if(t==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}`;
