@@ -19,11 +19,40 @@ export type Note = {
   translations?: Record<string, string>;
   /** Язык, на котором конспект сейчас показан; пусто — оригинал. */
   lang?: string;
+  /** Лучший результат теста, в процентах. */
+  quizBest?: number;
+  /** Сколько карточек отмечено как выученные (лучший результат). */
+  cardsKnown?: number;
   /** Когда конспект меняли в последний раз: нужно, чтобы понять, какая копия свежее. */
   updatedAt?: number;
   /** Копия уже есть в аккаунте. Если такого конспекта на сервере нет, значит его удалили с другого устройства. */
   synced?: boolean;
 };
+
+const COLORS = ["#3b7bff", "#8b5cf6", "#ec4899", "#f97316", "#10b981", "#06b6d4", "#eab308", "#ef4444"];
+
+/** Постоянный цвет конспекта: по id, чтобы не менялся между заходами. */
+export function noteColor(id: string) {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return COLORS[h % COLORS.length];
+}
+
+const EMOJI_RE = /^\p{Extended_Pictographic}(\uFE0F|\u200D\p{Extended_Pictographic})*/u;
+
+/** Эмодзи из начала заголовка (их ставит нейросеть) и заголовок без него. */
+export function splitTitle(title: string): { emoji: string; text: string } {
+  const m = title.match(EMOJI_RE);
+  return m ? { emoji: m[0], text: title.slice(m[0].length).trim() } : { emoji: "📘", text: title };
+}
+
+/** Прогресс по конспекту от 0 до 100: среднее по тесту и карточкам, если они есть. */
+export function noteProgress(n: Note): number | null {
+  const parts: number[] = [];
+  if (n.quizBest !== undefined) parts.push(n.quizBest);
+  if (n.flashcards?.length && n.cardsKnown !== undefined) parts.push(Math.round((n.cardsKnown / n.flashcards.length) * 100));
+  return parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length) : null;
+}
 
 // Конспекты, сделанные до входа по логину, лежали в общем ключе; они переезжают к первому, кто войдёт.
 const LEGACY_KEY = "konspektor.notes.v1";

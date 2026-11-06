@@ -8,9 +8,10 @@ import NotesSearch from "@/components/NotesSearch";
 import ProfileView from "@/components/ProfileView";
 import SettingsView from "@/components/SettingsView";
 import LoginView from "@/components/LoginView";
+import Icon from "@/components/Icon";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
-import { deleteServerNotes, fetchServerNotes, fileToBase64, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { deleteServerNotes, fetchServerNotes, noteColor, splitTitle, fileToBase64, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
@@ -27,9 +28,9 @@ function withSynced(notes: Note[], pushed: Note[]) {
 }
 
 const NAV: [Page, string, string][] = [
-  ["home", "🏠", "Главная"],
-  ["profile", "👤", "Личный кабинет"],
-  ["settings", "⚙️", "Настройки"],
+  ["home", "home", "Главная"],
+  ["profile", "user", "Личный кабинет"],
+  ["settings", "settings", "Настройки"],
 ];
 
 export default function Home() {
@@ -40,6 +41,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
+  const [sideQuery, setSideQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -245,27 +247,70 @@ export default function Home() {
   if (!session) return <LoginView onDone={login} />;
   const { user } = session;
 
+  const hasNotes = notes.length > 0;
+  const cardsKnown = notes.reduce((a, n) => a + (n.cardsKnown ?? 0), 0);
+  const cardsTotal = notes.reduce((a, n) => a + (n.flashcards?.length ?? 0), 0);
+  const scores = notes.flatMap((n) => (n.quizBest !== undefined ? [n.quizBest] : []));
+  const stats: [string, string, string, string][] = [
+    ["📚", String(notes.length), plural(notes.length, "конспект", "конспекта", "конспектов"), "#3b7bff"],
+    ["🃏", cardsTotal ? `${cardsKnown}/${cardsTotal}` : "0", "карточек выучено", "#10b981"],
+    ["🏆", scores.length ? `${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}%` : "—", "средний балл тестов", "#f97316"],
+  ];
+  const q = sideQuery.trim().toLowerCase();
+  const sideNotes = (q ? notes.filter((n) => n.title.toLowerCase().includes(q)) : notes).slice(0, 30);
+  const title = page === "settings" ? "Настройки" : page === "profile" ? "Личный кабинет" : current ? current.title : stage || draft ? "Новый конспект" : "Главная";
+
   return (
     <div className="flex min-h-screen">
-      <aside className={`no-print fixed inset-y-0 left-0 z-30 flex w-64 transform flex-col border-r border-line bg-surface p-4 transition md:sticky md:top-0 md:h-screen md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <button type="button" onClick={() => go("home")} className="btn-primary mb-5 w-full">+ Новый конспект</button>
-        <nav className="flex flex-col gap-1">
+      <aside className={`no-print fixed inset-y-0 left-0 z-30 flex w-72 transform flex-col border-r border-line bg-surface transition-transform md:sticky md:top-0 md:h-screen md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="flex items-center justify-between px-5 pb-3 pt-5">
+          <button type="button" onClick={() => go("home")} className="text-lg font-bold tracking-tight"><span className="text-accent">Конспект</span>ор</button>
+          <button type="button" onClick={() => setMenuOpen(false)} className="btn-icon md:hidden" aria-label="Закрыть меню"><Icon name="close" /></button>
+        </div>
+        <div className="px-4">
+          <button type="button" onClick={() => go("home")} className="btn-primary flex w-full items-center justify-center gap-2 !py-2.5"><Icon name="plus" className="h-4 w-4" />Новый конспект</button>
+        </div>
+        <nav className="mt-4 flex flex-col gap-0.5 px-3">
           {NAV.map(([id, icon, label]) => {
             const active = page === id && !(id === "home" && currentId);
             return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => go(id)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-left font-medium transition ${active ? "bg-accent/10 text-accent" : "hover:bg-foreground/5"}`}
-              >
-                <span>{icon}</span>
+              <button key={id} type="button" onClick={() => go(id)} className={`nav-item ${active ? "nav-item-active" : ""}`}>
+                <Icon name={icon} className="h-[18px] w-[18px]" />
                 {label}
               </button>
             );
           })}
         </nav>
-        <button type="button" onClick={() => go("profile")} className="mt-auto flex items-center gap-3 rounded-lg border border-line p-3 text-left hover:border-accent/60">
+
+        {hasNotes && (
+          <div className="mt-5 flex min-h-0 flex-1 flex-col border-t border-line pt-4">
+            <div className="flex items-center justify-between px-5 text-xs font-semibold uppercase tracking-wider text-muted">
+              Мои конспекты <span className="font-normal normal-case tracking-normal">{notes.length}</span>
+            </div>
+            {notes.length > 5 && (
+              <div className="relative mx-4 mt-2">
+                <Icon name="search" className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <input value={sideQuery} onChange={(e) => setSideQuery(e.target.value)} placeholder="Найти…" className="input !rounded-lg !py-1.5 !pl-8 text-sm" />
+              </div>
+            )}
+            <ul className="mt-2 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+              {sideNotes.map((n) => (
+                <li key={n.id}>
+                  <button type="button" onClick={() => openNote(n.id)} className={`nav-item w-full !py-2 ${currentId === n.id && page === "home" ? "nav-item-active" : ""}`}>
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base" style={{ background: `color-mix(in srgb, ${noteColor(n.id)} 20%, transparent)` }}>{splitTitle(n.title).emoji}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{splitTitle(n.title).text}</span>
+                      <span className="block text-xs font-normal text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {sideNotes.length === 0 && <li className="px-3 py-2 text-sm text-muted">Ничего не найдено</li>}
+            </ul>
+          </div>
+        )}
+
+        <button type="button" onClick={() => go("profile")} className="m-3 mt-auto flex items-center gap-3 rounded-xl p-2.5 text-left transition hover:bg-foreground/5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white">{user.firstName[0].toUpperCase()}</span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium">{fullName(user)}</span>
@@ -273,48 +318,67 @@ export default function Home() {
           </span>
         </button>
       </aside>
-      {menuOpen && <div className="fixed inset-0 z-20 bg-black/30 md:hidden" onClick={() => setMenuOpen(false)} />}
+      {menuOpen && <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setMenuOpen(false)} />}
 
       <main className="min-w-0 flex-1">
-        <header className="no-print sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-background/80 px-4 py-3 backdrop-blur sm:px-8">
-          <button type="button" onClick={() => setMenuOpen(true)} className="md:hidden" aria-label="Меню">☰</button>
-          <div className="text-lg font-bold"><span className="text-accent">Конспект</span>ор</div>
-          <div className="ml-auto text-sm text-muted">Нейросеть для учёбы</div>
+        <header className="no-print sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-line bg-background/80 px-3 backdrop-blur sm:px-6">
+          <button type="button" onClick={() => setMenuOpen(true)} className="btn-icon md:hidden" aria-label="Меню"><Icon name="menu" /></button>
+          {(current || page !== "home") && (
+            <button type="button" onClick={() => go("home")} className="btn-icon" aria-label="На главную"><Icon name="back" /></button>
+          )}
+          <div className="min-w-0 flex-1 truncate font-semibold">{title}</div>
+          {(current || page !== "home") && (
+            <button type="button" onClick={() => go("home")} className="btn-secondary hidden items-center gap-1.5 !py-1.5 text-sm sm:flex"><Icon name="plus" className="h-4 w-4" />Новый</button>
+          )}
         </header>
 
-        <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
+        <div className="mx-auto max-w-4xl px-4 py-6 sm:px-8 sm:py-10">
           {page === "settings" && <SettingsView settings={settings} onChange={changeSettings} />}
           {page === "profile" && <ProfileView user={user} notes={notes} cloud={cloud} syncError={syncError} onLogout={() => login(null)} onNotes={persist} onOpen={openNote} />}
           {page === "home" && !current && (
             <>
-              {!stage && !draft && (
+              {!stage && !draft && (hasNotes ? (
+                <div className="fade-up mb-6">
+                  <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Привет, {user.firstName}! 👋</h1>
+                  <p className="mt-1 text-muted">Запишите лекцию, загрузите файл или вставьте ссылку — конспект будет готов через минуту.</p>
+                  <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
+                    {stats.map(([icon, value, label, color]) => (
+                      <div key={label} className="card p-3 sm:p-4" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${color} 22%, var(--surface)), var(--surface))` }}>
+                        <div className="text-xl sm:text-2xl">{icon}</div>
+                        <div className="mt-1 text-xl font-bold sm:text-2xl">{value}</div>
+                        <div className="text-xs text-muted sm:text-sm">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
                 <div className="mb-8 text-center">
                   <h1 className="text-3xl font-extrabold tracking-tight sm:text-5xl">
-                    Готовься к экзаменам <span className="text-accent">в 10 раз быстрее</span>
+                    Готовься к экзаменам <span className="bg-gradient-to-r from-accent via-violet-500 to-pink-500 bg-clip-text text-transparent">в 10 раз быстрее</span>
                   </h1>
                   <p className="mx-auto mt-4 max-w-2xl text-muted sm:text-lg">
                     Запишите лекцию, загрузите файл или вставьте ссылку. Нейросеть сделает чёткий конспект, а из него карточки, тесты, шпаргалку и перевод на любой язык.
                   </p>
                 </div>
-              )}
+              ))}
               {!stage && <InputPanel busy={!!stage} onSubmit={handle} />}
               {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
               {!stage && !draft && <NotesSearch notes={notes} onOpen={openNote} onRemove={remove} />}
               {stage && !draft && <Spinner text={stage} />}
               {draft && (
-                <div className="card mt-2 p-6 sm:p-8">
+                <div className="card mt-2 p-4 sm:p-8">
                   {stage && <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />{stage}</div>}
                   <Markdown>{draft}</Markdown>
                 </div>
               )}
-              {!stage && !draft && (
+              {!stage && !draft && !hasNotes && (
                 <div className="mt-10 grid gap-4 sm:grid-cols-3">
                   {[
                     ["🎙️", "Любой источник", "Диктофон, аудио и видео, PDF, Word, фото, статьи и YouTube."],
                     ["🧠", "Умный конспект", "Структура, термины, определения и вопросы для самопроверки."],
                     ["🃏", "Учи, а не читай", "Флеш-карточки, тесты, шпаргалки, интеллект-карты и перевод."],
                   ].map(([icon, title, text]) => (
-                    <div key={title} className="card p-5">
+                    <div key={title} className="card lift p-5">
                       <div className="text-2xl">{icon}</div>
                       <div className="mt-2 font-semibold">{title}</div>
                       <div className="mt-1 text-sm text-muted">{text}</div>
@@ -324,7 +388,7 @@ export default function Home() {
               )}
             </>
           )}
-          {page === "home" && current && <NoteView key={current.id} note={current} onChange={updateNote} />}
+          {page === "home" && current && <NoteView key={current.id} note={current} onChange={updateNote} onRemove={() => window.confirm(`Удалить конспект «${current.title}»?`) && remove(current.id)} />}
         </div>
       </main>
     </div>

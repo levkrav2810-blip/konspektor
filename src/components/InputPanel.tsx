@@ -37,15 +37,15 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
 
   return (
     <div className="card overflow-hidden">
-      <div className="flex border-b border-line">
+      <div className="mx-3 mt-3 grid grid-cols-4 gap-1 rounded-xl border border-line bg-background p-1 sm:mx-5 sm:mt-5">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`flex-1 px-2 py-3.5 text-sm font-medium transition sm:text-base ${tab === t.id ? "border-b-2 border-accent text-accent" : "text-muted hover:text-foreground"}`}
+            className={`flex flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-xs font-medium transition sm:flex-row sm:justify-center sm:gap-2 sm:text-sm ${tab === t.id ? "bg-surface text-accent shadow-sm ring-1 ring-line" : "text-muted hover:text-foreground"}`}
           >
-            <span className="mr-1.5">{t.icon}</span>
+            <span className="text-base">{t.icon}</span>
             {t.label}
           </button>
         ))}
@@ -108,7 +108,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
           <input
             value={wishes}
             onChange={(e) => setWishes(e.target.value)}
-            placeholder="Пожелания (необязательно): например, «подробнее про формулы» или «на английском»"
+            placeholder="Пожелания: «подробнее про формулы», «на английском»…"
             className="input flex-1 text-sm"
           />
           {tab !== "voice" && (

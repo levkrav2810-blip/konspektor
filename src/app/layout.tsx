@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { THEME_BOOT_SCRIPT } from "@/lib/settings";
 
@@ -7,9 +8,11 @@ export const metadata: Metadata = {
   description: "Конспект из записи диктофона, файла, текста или ссылки. Карточки, тесты и перевод на любой язык.",
 };
 
+const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-sans", display: "swap" });
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="ru" className="h-full antialiased" suppressHydrationWarning>
+    <html lang="ru" className={`h-full antialiased ${inter.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
