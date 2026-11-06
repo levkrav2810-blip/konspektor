@@ -247,7 +247,14 @@ export default function Home() {
     setStage("Готовлю запись…");
     const chunks = await audioToChunks(blob);
     setStage("Распознаю речь…");
-    const text = await transcribeChunks(chunks, (done, total) => setStage(`Распознаю речь… ${Math.round((done / total) * 100)}%`));
+    const minutes = Math.round((chunks.length * 25) / 60);
+    const started = Date.now();
+    setStage(`Распознаю речь (запись ~${minutes} мин)…`);
+    const text = await transcribeChunks(chunks, (done, total) => {
+      const left = ((Date.now() - started) / done) * (total - done);
+      const eta = done >= 3 && left > 60_000 ? `, осталось ~${Math.ceil(left / 60_000)} мин` : "";
+      setStage(`Распознаю речь… ${Math.round((done / total) * 100)}%${eta}`);
+    });
     if (!text) throw new Error("В записи не удалось распознать речь");
     return text;
   }

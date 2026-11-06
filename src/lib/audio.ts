@@ -4,6 +4,8 @@ import { authFetch } from "@/lib/user";
 
 const RATE = 16000;
 const CHUNK_SECONDS = 25;
+// сколько фрагментов распознаём одновременно: длинная лекция — это сотни фрагментов
+const PARALLEL = 8;
 
 /**
  * Декодирует любую запись или видео, которое умеет браузер, в моно LPCM 16 кГц
@@ -69,6 +71,6 @@ export async function transcribeChunks(chunks: ArrayBuffer[], onProgress: (done:
       onProgress(++done, chunks.length);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, chunks.length) }, worker));
   return results.join(" ").replace(/\s+/g, " ").trim();
 }
