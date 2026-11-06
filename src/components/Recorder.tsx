@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { clearRecording, saveRecordingPart } from "@/lib/jobs";
+import { loadSession } from "@/lib/user";
+
+// каждые столько секунд кусок записи уходит в память браузера: закрытая вкладка не теряет лекцию
+const SAVE_EVERY = 10;
 
 function fmt(sec: number) {
   const m = Math.floor(sec / 60);
@@ -15,6 +20,17 @@ export default function Recorder({ onDone, disabled }: { onDone: (blob: Blob) =>
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
 
+  // во время записи браузер переспросит перед закрытием страницы
+  useEffect(() => {
+    if (state === "idle") return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [state]);
+
   useEffect(() => {
     if (state !== "recording") return;
     const t = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -27,9 +43,24 @@ export default function Recorder({ onDone, disabled }: { onDone: (blob: Blob) =>
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const rec = new MediaRecorder(stream);
       chunks.current = [];
-      rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
+      const userId = loadSession()?.user.id;
+      let saved = 0;
+      let seq = 0;
+      const flush = () => {
+        if (!userId || saved >= chunks.current.length) return;
+        const part = new Blob(chunks.current.slice(saved), { type: rec.mimeType });
+        saved = chunks.current.length;
+        saveRecordingPart(userId, seq++, part, rec.mimeType || "audio/webm");
+      };
+      if (userId) await clearRecording(userId);
+      rec.ondataavailable = (e) => {
+        if (!e.data.size) return;
+        chunks.current.push(e.data);
+        if (chunks.current.length - saved >= SAVE_EVERY) flush();
+      };
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        flush();
         onDone(new Blob(chunks.current, { type: rec.mimeType || "audio/webm" }));
       };
       rec.start(1000);

@@ -13,8 +13,11 @@ import LoginView from "@/components/LoginView";
 import Icon from "@/components/Icon";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
-import { deleteServerNotes, fetchServerNotes, fetchServerSubjects, loadSubjects, pushSubjects, saveSubjects, type Subject, fileToBase64, type ChatMessage, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { deleteServerNotes, fetchServerNotes, fetchServerSubjects, loadSubjects, pushSubjects, saveSubjects, type Subject, fileToBase64, type ChatMessage, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, sourceLabel, titleFromMarkdown, type Note } from "@/lib/client";
+import { clearRecording, deleteJob, loadJob, loadProgress, loadRecording, saveJob, saveProgress, type AudioJob } from "@/lib/jobs";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
+
+type JobMeta = Omit<AudioJob, "userId" | "blob" | "startedAt">;
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
 
@@ -50,7 +53,7 @@ export default function Home() {
   const [createTab, setCreateTab] = useState<Tab | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [adding, setAdding] = useState<Set<string> | null>(null);
-  const [retry, setRetry] = useState<{ m: Material; wishes: string; transcript: string } | null>(null);
+  const [unfinished, setUnfinished] = useState<{ kind: "job"; source: string; percent: number } | { kind: "recording" } | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -112,6 +115,23 @@ export default function Home() {
       cancelled = true;
     };
   }, [userId]);
+
+  // Незаконченная запись с прошлого раза: предложим продолжить.
+  useEffect(() => {
+    refreshUnfinished();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // Пока конспект создаётся, браузер переспросит перед закрытием страницы.
+  useEffect(() => {
+    if (!stage) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [stage]);
 
   // Предметы: копия из браузера, затем список из аккаунта (если база подключена).
   useEffect(() => {
@@ -224,7 +244,9 @@ export default function Home() {
     const stamped = next.map((n) => (changed.includes(n) ? { ...n, updatedAt: now, synced: false } : n));
     notesRef.current = stamped;
     setNotes(stamped);
-    saveNotes(userId, stamped);
+    if (!saveNotes(userId, stamped) && !cloud) {
+      setError("В браузере закончилось место: последние изменения не сохранятся после закрытия страницы. Скачайте конспекты в личном кабинете или удалите ненужные.");
+    }
     if (!cloud) return;
     const removed = prev.filter((p) => !next.some((n) => n.id === p.id)).map((p) => p.id);
     const toPush = stamped.filter((n, i) => changed.includes(next[i]));
@@ -241,29 +263,88 @@ export default function Home() {
     persist(notesRef.current.map((x) => (x.id === id ? { ...x, ...(typeof patch === "function" ? patch(x) : patch) } : x)));
   }
 
-  async function transcribe(blob: Blob) {
+  /** Незаконченная запись (распознавание или диктофон), оставшаяся после закрытия страницы. */
+  async function refreshUnfinished() {
+    if (!userId) return;
+    const job = await loadJob(userId);
+    if (job) {
+      const texts = (await loadProgress(userId))?.texts || [];
+      const done = texts.filter((t) => t !== null).length;
+      return setUnfinished({ kind: "job", source: job.source, percent: texts.length ? Math.round((done / texts.length) * 100) : 0 });
+    }
+    const rec = await loadRecording(userId);
+    setUnfinished(rec?.size ? { kind: "recording" } : null);
+  }
+
+  async function resumeUnfinished() {
+    if (!userId || !unfinished || stage) return;
+    setUnfinished(null);
+    if (unfinished.kind === "job") {
+      const job = await loadJob(userId);
+      if (!job) return;
+      const texts = (await loadProgress(userId))?.texts || [];
+      return handle({ kind: "audio", blob: job.blob, name: job.name, source: job.source }, job.wishes, { resume: texts, subjectId: job.subjectId });
+    }
+    const blob = await loadRecording(userId);
+    if (blob) handle({ kind: "audio", blob, name: "recording.webm", source: "запись диктофона" }, "");
+  }
+
+  async function dismissUnfinished() {
+    if (!userId || !window.confirm("Удалить незаконченную запись? Её нельзя будет восстановить.")) return;
+    await deleteJob(userId);
+    await clearRecording(userId);
+    setUnfinished(null);
+  }
+
+  /**
+   * Распознаёт запись. Звук и уже распознанные фрагменты сохраняются в браузере,
+   * поэтому если закрыть страницу, распознавание продолжится с того же места.
+   */
+  async function transcribe(blob: Blob, job: JobMeta, resume?: (string | null)[]) {
     if (blob.size > MAX_MEDIA_MB * 1024 * 1024) {
       throw new Error(`Файл больше ${MAX_MEDIA_MB} МБ. Сохраните из видео только звук (mp3 или m4a) и загрузите его.`);
     }
+    if (userId && !resume) {
+      // запись с диктофона теперь лежит в задании, отдельная копия не нужна
+      if (await saveJob({ userId, blob, ...job, startedAt: Date.now() })) await clearRecording(userId);
+    }
     setStage("Готовлю запись…");
     const chunks = await audioToChunks(blob);
-    setStage("Распознаю речь…");
     const minutes = Math.round((chunks.length * 25) / 60);
     const started = Date.now();
+    const already = resume?.filter((t) => t !== null).length ?? 0;
     setStage(`Распознаю речь (запись ~${minutes} мин)…`);
-    const text = await transcribeChunks(chunks, (done, total) => {
-      const left = ((Date.now() - started) / done) * (total - done);
-      const eta = done >= 3 && left > 60_000 ? `, осталось ~${Math.ceil(left / 60_000)} мин` : "";
-      setStage(`Распознаю речь… ${Math.round((done / total) * 100)}%${eta}`);
-    });
-    if (!text) throw new Error("В записи не удалось распознать речь");
-    return text;
+    let latest: (string | null)[] | null = null;
+    const save = () => latest && userId && saveProgress({ userId, texts: latest });
+    try {
+      const text = await transcribeChunks(
+        chunks,
+        (done, total) => {
+          const fresh = done - already;
+          const left = fresh > 0 ? ((Date.now() - started) / fresh) * (total - done) : 0;
+          const eta = fresh >= 3 && left > 60_000 ? `, осталось ~${Math.ceil(left / 60_000)} мин` : "";
+          setStage(`Распознаю речь… ${Math.round((done / total) * 100)}%${eta}`);
+        },
+        {
+          done: resume,
+          onChunk: (texts) => {
+            latest = [...texts];
+            save();
+          },
+        },
+      );
+      if (!text) throw new Error("В записи не удалось распознать речь");
+      return text;
+    } catch (e) {
+      await save();
+      throw e;
+    }
   }
 
-  async function prepare(m: Material): Promise<{ body: SummarizeBody; transcript?: string }> {
+  async function prepare(m: Material, job: Omit<JobMeta, "name" | "source">, resume?: (string | null)[]): Promise<{ body: SummarizeBody; transcript?: string }> {
     if (m.kind === "text") return { body: { text: m.text } };
     if (m.kind === "audio") {
-      const transcript = await transcribe(m.blob);
+      const transcript = await transcribe(m.blob, { ...job, name: m.name, source: m.source }, resume);
       return { body: { text: transcript }, transcript };
     }
     if (m.kind === "link") {
@@ -273,7 +354,7 @@ export default function Home() {
     }
     const f = m.file;
     if (f.type.startsWith("audio/") || f.type.startsWith("video/")) {
-      const transcript = await transcribe(f);
+      const transcript = await transcribe(f, { ...job, name: f.name, source: m.source }, resume);
       return { body: { text: transcript }, transcript };
     }
     if (f.type === "application/pdf" || f.type.startsWith("image/")) {
@@ -289,42 +370,88 @@ export default function Home() {
     throw new Error("Этот формат пока не поддерживается. Попробуйте PDF, Word, TXT, аудио или видео.");
   }
 
-  async function handle(m: Material, wishes: string, known?: { transcript: string }) {
-    const subjectForNew = page === "subject" ? subjectId : null;
+  /** Меняет конспект только в браузере: черновик, который ещё пишется, не гоняем в аккаунт каждые секунды. */
+  function saveLocal(id: string, patch: Partial<Note>) {
+    if (!userId) return;
+    const next = notesRef.current.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: Date.now(), synced: false } : n));
+    notesRef.current = next;
+    setNotes(next);
+    saveNotes(userId, next);
+  }
+
+  /** Пишет конспект по тексту; если noteId задан, дописывает уже сохранённый черновик. */
+  async function writeSummary(body: SummarizeBody, source: string, wishes: string, noteId?: string, subject?: string) {
+    setStage("Пишу конспект…");
+    const { language, detail, additions, answers } = settings;
+    let saved = Date.now();
+    const summary = await postStream("/api/summarize", { ...body, source, wishes, settings: { language, detail, additions, answers } }, (text) => {
+      setDraft(text);
+      if (noteId && Date.now() - saved > 4000) {
+        saved = Date.now();
+        saveLocal(noteId, { summary: text });
+      }
+    });
+    const title = titleFromMarkdown(summary, source);
+    if (noteId) {
+      patchNote(noteId, { summary, title, pending: undefined });
+    } else {
+      noteId = crypto.randomUUID();
+      persist([{ id: noteId, title, createdAt: Date.now(), source, summary, subjectId: subject }, ...notesRef.current]);
+    }
+    setCurrentId(noteId);
+    setCreateTab(null);
+    setDraft("");
+  }
+
+  async function handle(m: Material, wishes: string, opts: { resume?: (string | null)[]; subjectId?: string } = {}) {
+    if (stage) return;
+    const subjectForNew = opts.subjectId ?? (page === "subject" ? subjectId ?? undefined : undefined);
     setError(null);
-    setRetry(null);
     setDraft("");
     setCurrentId(null);
-    let transcript: string | undefined = known?.transcript;
+    setUnfinished(null);
+    const allWishes = [settings.defaultWishes.trim(), wishes.trim()].filter(Boolean).join(". ");
     try {
-      const prepared = known ? { body: { text: known.transcript } as SummarizeBody, transcript: known.transcript } : await prepare(m);
-      const { body } = prepared;
-      transcript = prepared.transcript;
-      setStage("Пишу конспект…");
-      const allWishes = [settings.defaultWishes.trim(), wishes.trim()].filter(Boolean).join(". ");
-      const { language, detail, additions, answers } = settings;
-      const summary = await postStream(
-        "/api/summarize",
-        { ...body, source: m.source, wishes: allWishes, settings: { language, detail, additions, answers } },
-        setDraft,
-      );
-      const note: Note = {
-        id: crypto.randomUUID(),
-        title: titleFromMarkdown(summary, m.source),
-        createdAt: Date.now(),
-        source: m.source,
-        summary,
-        transcript,
-        subjectId: subjectForNew ?? undefined,
-      };
-      persist([note, ...notesRef.current]);
-      setCurrentId(note.id);
-      setCreateTab(null);
-      setDraft("");
+      const { body, transcript } = await prepare(m, { wishes, subjectId: subjectForNew }, opts.resume);
+      let noteId: string | undefined;
+      if (body.text) {
+        // конспект появляется в списке сразу: если страница закроется, его можно будет дописать
+        noteId = crypto.randomUUID();
+        const draftNote: Note = {
+          id: noteId,
+          title: `⏳ Недописанный конспект · ${sourceLabel(m.source) === "📄 Файл" ? m.source : sourceLabel(m.source).replace(/^\S+\s/, "")}`.slice(0, 80),
+          createdAt: Date.now(),
+          source: m.source,
+          summary: "",
+          transcript,
+          subjectId: subjectForNew,
+          pending: { wishes: allWishes, text: transcript ? undefined : body.text },
+        };
+        persist([draftNote, ...notesRef.current]);
+      }
+      if (userId) await deleteJob(userId);
+      await writeSummary(body, m.source, allWishes, noteId, subjectForNew);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      // запись уже распознана — повтор не должен заново грузить полтора часа звука
-      if (transcript) setRetry({ m, wishes, transcript });
+      refreshUnfinished();
+    } finally {
+      setStage(null);
+    }
+  }
+
+  /** Дописывает конспект, который не успел дописаться (закрыли страницу, пропала связь). */
+  async function finishNote(id: string) {
+    const n = notesRef.current.find((x) => x.id === id);
+    const text = n?.pending?.text ?? n?.transcript;
+    if (!n?.pending || !text || stage) return;
+    setError(null);
+    setDraft("");
+    setCurrentId(null);
+    window.scrollTo(0, 0);
+    try {
+      await writeSummary({ text }, n.source, n.pending.wishes, id);
+    } catch (e) {
+      setError(`${e instanceof Error ? e.message : String(e)}. Конспект сохранён, его можно дописать позже.`);
     } finally {
       setStage(null);
     }
@@ -376,16 +503,21 @@ export default function Home() {
           <InputPanel key={createTab} tab={createTab} busy={!!stage} onSubmit={handle} />
         </div>
       )}
-      {error && (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">
-          <span className="flex-1">{error}</span>
-          {retry && !stage && (
-            <button type="button" onClick={() => handle(retry.m, retry.wishes, { transcript: retry.transcript })} className="btn-primary !py-2 text-sm">
-              Повторить (запись уже распознана)
-            </button>
-          )}
+      {unfinished && !stage && (
+        <div className="pop-in mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+          <span className="text-2xl">🎙️</span>
+          <span className="min-w-0 flex-1">
+            {unfinished.kind === "job" ? (
+              <>Запись «{sourceLabel(unfinished.source) === "📄 Файл" ? unfinished.source : "с диктофона"}» не успела распознаться{unfinished.percent ? ` (готово ${unfinished.percent}%)` : ""}. Продолжу с того же места, загружать заново не нужно.</>
+            ) : (
+              <>Нашлась запись с диктофона, из которой ещё не сделан конспект.</>
+            )}
+          </span>
+          <button type="button" onClick={resumeUnfinished} className="btn-primary !py-2 text-sm">{unfinished.kind === "job" ? "Продолжить" : "Сделать конспект"}</button>
+          <button type="button" onClick={dismissUnfinished} className="btn-ghost !py-2 text-sm">Удалить</button>
         </div>
       )}
+      {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
       {stage && !draft && <div className="card mt-2"><Spinner text={stage} /></div>}
       {draft && (
         <div className="card mt-2 p-4 sm:p-8">
@@ -600,6 +732,8 @@ export default function Home() {
               onRemove={() => window.confirm(`Удалить конспект «${current.title}»?`) && remove(current.id)}
               onHome={() => go("home")}
               onSubject={openSubject}
+              onFinish={() => finishNote(current.id)}
+              busy={!!stage}
             />
           )}
         </div>

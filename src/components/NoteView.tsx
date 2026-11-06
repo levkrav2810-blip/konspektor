@@ -33,6 +33,8 @@ export default function NoteView({
   onRemove,
   onHome,
   onSubject,
+  onFinish,
+  busy,
 }: {
   note: Note;
   subjects: Subject[];
@@ -40,6 +42,10 @@ export default function NoteView({
   onRemove: () => void;
   onHome: () => void;
   onSubject: (id: string) => void;
+  /** Дописать конспект, который не успел дописаться. */
+  onFinish?: () => void;
+  /** Сейчас пишется другой конспект. */
+  busy?: boolean;
 }) {
   const [view, setView] = useState<View>("summary");
   const [loading, setLoading] = useState<string | null>(null);
@@ -221,6 +227,16 @@ export default function NoteView({
 
         {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
 
+        {note.pending && (
+          <div className="no-print mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+            <span className="text-2xl">⏳</span>
+            <span className="min-w-0 flex-1">
+              {busy ? "Конспект сейчас пишется…" : `Конспект не дописан: страница закрылась или пропала связь.${note.transcript ? " Расшифровка сохранена." : ""} Нейросеть допишет его по сохранённому тексту.`}
+            </span>
+            {!busy && onFinish && <button type="button" onClick={onFinish} className="btn-primary !py-2 text-sm">Дописать конспект</button>}
+          </div>
+        )}
+
         {view === "summary" ? (
           <>
             {note.transcript && (
@@ -230,7 +246,7 @@ export default function NoteView({
                 <Icon name="chevron" className="h-5 w-5 text-muted" />
               </button>
             )}
-            <div className="no-print mt-6 border-t border-line pt-6">
+            {!note.pending && <div className="no-print mt-6 border-t border-line pt-6">
               <div className="grid gap-3 sm:grid-cols-2">
                 {tiles.map((t) => (
                   <button key={t.key} type="button" onClick={t.onClick} disabled={!!loading} className="tile">
@@ -243,7 +259,7 @@ export default function NoteView({
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
 
             <section className="mt-8">
               <div className="no-print mb-2 flex flex-wrap items-center justify-end gap-1">
@@ -258,8 +274,10 @@ export default function NoteView({
                     <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />Перевожу на {translating}…</div>
                     {streaming ? <Markdown>{streaming}</Markdown> : <p className="text-muted">Начинаю перевод…</p>}
                   </>
-                ) : (
+                ) : summary ? (
                   <Markdown>{summary}</Markdown>
+                ) : (
+                  <p className="text-muted">Конспект ещё не написан.</p>
                 )}
               </div>
             </section>
