@@ -91,6 +91,11 @@ export type Note = {
   game?: GameItem[];
   /** Рекорд в игре. */
   gameBest?: number;
+  /**
+   * Конспект ещё не дописан (страница закрылась или пропала связь): пожелания и исходный
+   * текст, по которым его можно дописать. Для записей текстом служит расшифровка.
+   */
+  pending?: { wishes: string; text?: string };
   /** Лучший результат теста, в процентах. */
   quizBest?: number;
   /** Сколько карточек отмечено как выученные (лучший результат). */
@@ -154,11 +159,13 @@ export function loadNotes(userId: string): Note[] {
   return merged;
 }
 
+/** Сохраняет конспекты в браузере; false — не хватило места. */
 export function saveNotes(userId: string, notes: Note[]) {
   try {
     localStorage.setItem(keyFor(userId), JSON.stringify(notes));
+    return true;
   } catch {
-    // переполнено хранилище — конспекты всё равно есть в аккаунте
+    return false;
   }
 }
 

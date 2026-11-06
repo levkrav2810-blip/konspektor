@@ -84,19 +84,28 @@ async function recognize(chunk: ArrayBuffer): Promise<string> {
  * Отправляет фрагменты на распознавание по несколько параллельно, сохраняя порядок.
  * Если отдельные фрагменты так и не распознались, пропускает их (до 5% записи), чтобы
  * один сбой не перечёркивал полтора часа работы.
+ * done — уже распознанные раньше фрагменты (null — ещё нет): их не отправляем повторно.
+ * onChunk вызывается после каждого распознанного фрагмента, чтобы сохранить прогресс.
  */
-export async function transcribeChunks(chunks: ArrayBuffer[], onProgress: (done: number, total: number) => void) {
-  const results: string[] = new Array(chunks.length).fill("");
+export async function transcribeChunks(
+  chunks: ArrayBuffer[],
+  onProgress: (done: number, total: number) => void,
+  opts: { done?: (string | null)[]; onChunk?: (texts: (string | null)[]) => void } = {},
+) {
+  const results: (string | null)[] = chunks.map((_, i) => opts.done?.[i] ?? null);
+  const todo = results.flatMap((r, i) => (r === null ? [i] : []));
   let next = 0;
-  let done = 0;
+  let done = chunks.length - todo.length;
   let failed = 0;
   let fatal: Error | null = null;
   const maxSkipped = Math.max(1, Math.floor(chunks.length * 0.05));
+  if (done) onProgress(done, chunks.length);
   async function worker() {
-    while (next < chunks.length && !fatal) {
-      const i = next++;
+    while (next < todo.length && !fatal) {
+      const i = todo[next++];
       try {
         results[i] = await recognize(chunks[i]);
+        opts.onChunk?.(results);
       } catch (e) {
         const err = e as Error & { permanent?: boolean };
         if (err.permanent || ++failed > maxSkipped) {
@@ -107,7 +116,7 @@ export async function transcribeChunks(chunks: ArrayBuffer[], onProgress: (done:
       if (!fatal) onProgress(++done, chunks.length);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(PARALLEL, chunks.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, worker));
   if (fatal) throw fatal;
   return results.join(" ").replace(/\s+/g, " ").trim();
 }
