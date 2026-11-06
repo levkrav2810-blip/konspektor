@@ -49,14 +49,16 @@ body {
   .nav-item-active { @apply bg-accent/10 text-accent hover:bg-accent/15 hover:text-accent; }
   .badge { @apply inline-flex items-center gap-1 rounded-full border border-line bg-background/60 px-2.5 py-1; }
   .lift { @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-lg; }
+  .tile { @apply flex w-full items-center gap-4 rounded-2xl border border-line bg-surface p-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-accent/50 hover:shadow-lg disabled:pointer-events-none disabled:opacity-60 sm:p-5; }
+  .tile-icon { @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xl; }
   .tab { @apply -mb-px whitespace-nowrap border-b-2 border-transparent px-3.5 py-2.5 text-sm font-medium text-muted transition hover:text-foreground; }
   .tab-active { @apply border-accent text-accent hover:text-accent; }
 }
 
 /* Полоска прогресса: внутренний div задаёт ширину */
 .progress { height: 0.5rem; border-radius: 999px; background: color-mix(in srgb, var(--foreground) 10%, transparent); overflow: hidden; }
-.progress > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #a855f7)); transition: width 0.5s ease; }
-.progress-green > div { background: linear-gradient(90deg, #10b981, #34d399); }
+.progress > * { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #a855f7)); transition: width 0.5s ease; }
+.progress-green > * { background: linear-gradient(90deg, #10b981, #34d399); }
 
 /* Анимации появления */
 @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -99,3 +101,10 @@ body {
   body { background: white; color: black; }
   .card { border: none; box-shadow: none; }
 }
+
+/* Ответы в чате: компактнее, чем конспект */
+.chat-md .md { line-height: 1.6; font-size: 0.875rem; }
+.chat-md .md h1, .chat-md .md h2, .chat-md .md h3 { font-size: 1rem; margin: 0.6rem 0 0.3rem; border: none; padding: 0; }
+.chat-md .md p { margin: 0.35rem 0; }
+.chat-md .md > :first-child { margin-top: 0; }
+.chat-md .md > :last-child { margin-bottom: 0; }

@@ -16,10 +16,11 @@ const TABS = [
   { id: "text", label: "Текст", icon: "✍️" },
 ] as const;
 
-type Tab = (typeof TABS)[number]["id"];
+export type Tab = (typeof TABS)[number]["id"];
 
-export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit: (m: Material, wishes: string) => void }) {
-  const [tab, setTab] = useState<Tab>("voice");
+export default function InputPanel({ busy, onSubmit, tab: fixedTab }: { busy: boolean; onSubmit: (m: Material, wishes: string) => void; tab?: Tab }) {
+  const [ownTab, setTab] = useState<Tab>("voice");
+  const tab = fixedTab ?? ownTab;
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -37,7 +38,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
 
   return (
     <div className="card overflow-hidden">
-      <div className="mx-3 mt-3 grid grid-cols-4 gap-1 rounded-xl border border-line bg-background p-1 sm:mx-5 sm:mt-5">
+      {!fixedTab && <div className="mx-3 mt-3 grid grid-cols-4 gap-1 rounded-xl border border-line bg-background p-1 sm:mx-5 sm:mt-5">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -49,7 +50,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
             {t.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       <div className="p-5 sm:p-6">
         {tab === "voice" && (
@@ -88,6 +89,7 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://… статья, YouTube-видео, PDF"
               className="input"
+              autoFocus
               onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
             />
             <p className="text-sm text-muted">Подойдёт статья, страница Википедии, видео с YouTube (по субтитрам) или ссылка на PDF.</p>
@@ -99,7 +101,8 @@ export default function InputPanel({ busy, onSubmit }: { busy: boolean; onSubmit
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Вставьте текст лекции, расшифровку или главу учебника…"
-            rows={10}
+            rows={8}
+            autoFocus
             className="input resize-y"
           />
         )}

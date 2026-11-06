@@ -5,6 +5,63 @@ import { authFetch } from "@/lib/user";
 export type Flashcard = { front: string; back: string };
 export type QuizQuestion = { question: string; options: string[]; correctIndex: number; explanation: string };
 
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type Subject = { id: string; name: string; color: string; createdAt: number };
+
+export const SUBJECT_COLORS = ["#3b7bff", "#10b981", "#ec4899", "#f97316", "#8b5cf6", "#06b6d4", "#eab308", "#ef4444"];
+
+const subjectsKey = (userId: string) => `konspektor.subjects.${userId}`;
+
+export function loadSubjects(userId: string): Subject[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(subjectsKey(userId)) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSubjects(userId: string, subjects: Subject[]) {
+  try {
+    localStorage.setItem(subjectsKey(userId), JSON.stringify(subjects));
+  } catch {
+    // хранилище недоступно
+  }
+}
+
+/** Предметы из аккаунта; null — база не подключена. */
+export async function fetchServerSubjects(): Promise<Subject[] | null> {
+  const res = await authFetch("/api/subjects");
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return data.enabled ? (data.subjects as Subject[]) : null;
+}
+
+export async function pushSubjects(subjects: Subject[]) {
+  const res = await authFetch("/api/subjects", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subjects }) });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+/** Подпись дня для списка: «Сб, 24 окт.», «Сегодня», «Вчера». */
+export function dayLabel(ts: number) {
+  const d = new Date(ts);
+  const today = new Date();
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  if (diff === 0) return "Сегодня";
+  if (diff === 1) return "Вчера";
+  const s = d.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "short", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Откуда конспект: для подписи в списке. */
+export function sourceLabel(source: string) {
+  if (source === "запись диктофона") return "🎙️ Запись";
+  if (source === "текст") return "✍️ Текст";
+  if (/^https?:\/\//.test(source)) return "🔗 Ссылка";
+  return "📄 Файл";
+}
+
 export type Note = {
   id: string;
   title: string;
@@ -19,6 +76,10 @@ export type Note = {
   translations?: Record<string, string>;
   /** Язык, на котором конспект сейчас показан; пусто — оригинал. */
   lang?: string;
+  /** Предмет (папка), в которой лежит конспект. */
+  subjectId?: string;
+  /** Переписка с нейросетью по этому конспекту. */
+  chat?: ChatMessage[];
   /** Лучший результат теста, в процентах. */
   quizBest?: number;
   /** Сколько карточек отмечено как выученные (лучший результат). */
