@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Note } from "@/lib/client";
+import { noteColor, noteProgress, splitTitle, type Note } from "@/lib/client";
 
 const PAGE = 6;
 
@@ -14,7 +14,8 @@ function plain(md: string) {
 }
 
 function snippet(note: Note, q: string) {
-  const text = plain(note.summary);
+  // первый заголовок повторяет название конспекта
+  const text = plain(note.summary.replace(/^\s*#\s[^\n]*\n/, ""));
   if (!q) return text.slice(0, 140);
   const i = text.toLowerCase().indexOf(q);
   if (i < 0) return text.slice(0, 140);
@@ -39,7 +40,7 @@ export default function NotesSearch({ notes, onOpen, onRemove }: { notes: Note[]
         <h2 className="font-semibold">Мои конспекты <span className="text-muted">({notes.length})</span></h2>
       </div>
       <div className="relative">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">🔍</span>
+        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted">🔍</span>
         <input
           type="search"
           value={query}
@@ -53,23 +54,42 @@ export default function NotesSearch({ notes, onOpen, onRemove }: { notes: Note[]
         <p className="mt-4 text-sm text-muted">Ничего не найдено по запросу «{query.trim()}».</p>
       ) : (
         <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-          {shown.map((n) => (
-            <li key={n.id} className="group relative">
-              <button type="button" onClick={() => onOpen(n.id)} className="card block h-full w-full p-4 text-left transition hover:border-accent">
-                <div className="truncate pr-6 font-medium">{n.title}</div>
-                <div className="mt-0.5 text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")} · {n.source}</div>
-                <div className="mt-2 line-clamp-2 text-sm text-muted">{snippet(n, q)}</div>
+          {shown.map((n, i) => {
+            const { emoji, text } = splitTitle(n.title);
+            const progress = noteProgress(n);
+            return (
+            <li key={n.id} className="fade-up group relative" style={{ animationDelay: `${Math.min(i, 8) * 40}ms`, ["--c" as string]: noteColor(n.id) }}>
+              <button type="button" onClick={() => onOpen(n.id)} className="card lift block h-full w-full overflow-hidden text-left hover:border-[var(--c)]">
+                <div className="h-1.5" style={{ background: "linear-gradient(90deg, var(--c), color-mix(in srgb, var(--c) 40%, transparent))" }} />
+                <div className="p-4">
+                  <div className="flex items-start gap-3 pr-6">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-2xl" style={{ background: "color-mix(in srgb, var(--c) 18%, transparent)" }}>{emoji}</div>
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">{text}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")} · {n.source}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 line-clamp-2 text-sm text-muted">{snippet(n, q)}</div>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+                    {n.flashcards?.length ? <span className="badge">🃏 {n.flashcards.length}</span> : null}
+                    {n.quiz?.length ? <span className="badge">✅ {n.quizBest !== undefined ? `${n.quizBest}%` : "тест"}</span> : null}
+                    {progress !== null && (
+                      <div className="progress ml-auto w-20" style={{ ["--accent" as string]: "var(--c)" }}><div style={{ width: `${progress}%` }} /></div>
+                    )}
+                  </div>
+                </div>
               </button>
               <button
                 type="button"
                 onClick={() => window.confirm(`Удалить конспект «${n.title}»?`) && onRemove(n.id)}
-                className="absolute right-2 top-2 rounded-md px-2 text-lg text-muted opacity-60 hover:text-red-500 group-hover:opacity-100 sm:opacity-0"
+                className="absolute right-2 top-3.5 rounded-md px-2 text-lg text-muted opacity-60 hover:text-red-500 group-hover:opacity-100 sm:opacity-0"
                 aria-label="Удалить конспект"
               >
                 ×
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       {found.length > limit && (

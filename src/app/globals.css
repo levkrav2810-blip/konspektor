@@ -33,7 +33,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 @layer components {
@@ -44,10 +44,29 @@ body {
   .btn-chip { @apply rounded-full border border-line bg-background px-3.5 py-1.5 text-sm font-medium transition hover:border-accent hover:text-accent disabled:opacity-50; }
   .btn-ghost { @apply rounded-lg px-2.5 py-1 text-sm text-muted transition hover:bg-foreground/5 hover:text-foreground; }
   .link { @apply text-accent hover:underline; }
+  .btn-icon { @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-foreground/5 hover:text-foreground; }
+  .nav-item { @apply flex items-center gap-3 rounded-lg px-3 py-2 text-left text-[15px] font-medium text-foreground/80 transition hover:bg-foreground/5 hover:text-foreground; }
+  .nav-item-active { @apply bg-accent/10 text-accent hover:bg-accent/15 hover:text-accent; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full border border-line bg-background/60 px-2.5 py-1; }
+  .lift { @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-lg; }
+  .tab { @apply -mb-px whitespace-nowrap border-b-2 border-transparent px-3.5 py-2.5 text-sm font-medium text-muted transition hover:text-foreground; }
+  .tab-active { @apply border-accent text-accent hover:text-accent; }
 }
 
+/* Полоска прогресса: внутренний div задаёт ширину */
+.progress { height: 0.5rem; border-radius: 999px; background: color-mix(in srgb, var(--foreground) 10%, transparent); overflow: hidden; }
+.progress > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #a855f7)); transition: width 0.5s ease; }
+.progress-green > div { background: linear-gradient(90deg, #10b981, #34d399); }
+
+/* Анимации появления */
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { 0% { opacity: 0; transform: scale(0.94); } 70% { transform: scale(1.02); } 100% { opacity: 1; transform: none; } }
+.fade-up { animation: fade-up 0.35s ease both; }
+.pop-in { animation: pop-in 0.4s ease both; }
+@media (prefers-reduced-motion: reduce) { .fade-up, .pop-in { animation: none; } }
+
 /* Оформление конспекта */
-.md { line-height: 1.7; }
+.md { line-height: 1.75; font-size: 1.0625rem; }
 .md h1 { font-size: 1.9rem; font-weight: 800; margin: 0 0 1rem; line-height: 1.25; }
 .md h2 { font-size: 1.4rem; font-weight: 700; margin: 2rem 0 0.75rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--line); }
 .md h3 { font-size: 1.15rem; font-weight: 700; margin: 1.5rem 0 0.5rem; }
