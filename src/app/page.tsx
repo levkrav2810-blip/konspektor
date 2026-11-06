@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import InputPanel, { type Material } from "@/components/InputPanel";
-import NoteView, { Spinner } from "@/components/NoteView";
+import InputPanel, { type Material, type Tab } from "@/components/InputPanel";
+import NoteView, { Spinner, type NotePatch } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
-import NotesSearch from "@/components/NotesSearch";
+import NotesList from "@/components/NotesList";
+import Subjects from "@/components/Subjects";
+import ChatPanel from "@/components/ChatPanel";
 import ProfileView from "@/components/ProfileView";
 import SettingsView from "@/components/SettingsView";
 import LoginView from "@/components/LoginView";
 import Icon from "@/components/Icon";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
-import { deleteServerNotes, fetchServerNotes, noteColor, splitTitle, fileToBase64, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { deleteServerNotes, fetchServerNotes, fetchServerSubjects, loadSubjects, pushSubjects, saveSubjects, type Subject, fileToBase64, type ChatMessage, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
@@ -19,7 +21,7 @@ type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string
 const TEXT_EXT = /\.(txt|md|srt|vtt|csv|json)$/i;
 const MAX_MEDIA_MB = 300;
 
-type Page = "home" | "profile" | "settings";
+type Page = "home" | "subject" | "chat" | "profile" | "settings";
 
 /** Отмечает отправленные в аккаунт конспекты, если их не успели снова изменить. */
 function withSynced(notes: Note[], pushed: Note[]) {
@@ -29,6 +31,7 @@ function withSynced(notes: Note[], pushed: Note[]) {
 
 const NAV: [Page, string, string][] = [
   ["home", "home", "Главная"],
+  ["chat", "chat", "Чат с нейросетью"],
   ["profile", "user", "Личный кабинет"],
   ["settings", "settings", "Настройки"],
 ];
@@ -41,7 +44,12 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
-  const [sideQuery, setSideQuery] = useState("");
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [subjectId, setSubjectId] = useState<string | null>(null);
+  const [homeTab, setHomeTab] = useState<"notes" | "subjects">("notes");
+  const [createTab, setCreateTab] = useState<Tab | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [adding, setAdding] = useState<Set<string> | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -104,6 +112,58 @@ export default function Home() {
     };
   }, [userId]);
 
+  // Предметы: копия из браузера, затем список из аккаунта (если база подключена).
+  useEffect(() => {
+    if (!userId) return;
+    const local = loadSubjects(userId);
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    setSubjects(local);
+    let cancelled = false;
+    fetchServerSubjects()
+      .then(async (remote) => {
+        if (cancelled || !remote) return;
+        if (!remote.length && local.length) return pushSubjects(local);
+        setSubjects(remote);
+        saveSubjects(userId, remote);
+      })
+      .catch(() => {
+        // без аккаунта предметы остаются в браузере
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Общий чат с нейросетью хранится в этом браузере.
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      /* eslint-disable-next-line react-hooks/set-state-in-effect */
+      setChat(JSON.parse(localStorage.getItem(`konspektor.chat.${userId}`) || "[]"));
+    } catch {
+      setChat([]);
+    }
+  }, [userId]);
+
+  function updateChat(fn: (m: ChatMessage[]) => ChatMessage[]) {
+    setChat((prev) => {
+      const next = fn(prev).slice(-200);
+      try {
+        localStorage.setItem(`konspektor.chat.${userId}`, JSON.stringify(next));
+      } catch {
+        // хранилище недоступно — переписка живёт до перезагрузки
+      }
+      return next;
+    });
+  }
+
+  function changeSubjects(next: Subject[]) {
+    if (!userId) return;
+    setSubjects(next);
+    saveSubjects(userId, next);
+    if (cloud) pushSubjects(next).catch((e) => setSyncError(`Предметы сохранены в браузере, но не в аккаунте: ${e instanceof Error ? e.message : e}`));
+  }
+
   function changeSettings(s: Settings) {
     setSettings(s);
     saveSettings(s);
@@ -120,13 +180,29 @@ export default function Home() {
   function go(p: Page) {
     setPage(p);
     setCurrentId(null);
+    setSubjectId(null);
     setMenuOpen(false);
+    window.scrollTo(0, 0);
   }
 
   function openNote(id: string) {
-    setPage("home");
+    setPage((p) => (p === "subject" ? p : "home"));
     setCurrentId(id);
     setMenuOpen(false);
+    window.scrollTo(0, 0);
+  }
+
+  function openSubject(id: string) {
+    setPage("subject");
+    setSubjectId(id);
+    setCurrentId(null);
+    setMenuOpen(false);
+    window.scrollTo(0, 0);
+  }
+
+  function newNote() {
+    go("home");
+    setCreateTab((t) => t ?? "voice");
   }
 
   /** Отмечает конспекты, которые точно сохранены в аккаунте. */
@@ -159,8 +235,9 @@ export default function Home() {
       .catch((e) => setSyncError(`Конспект сохранён в браузере, но не в аккаунте: ${e instanceof Error ? e.message : e}`));
   }
 
-  function updateNote(n: Note) {
-    persist(notesRef.current.map((x) => (x.id === n.id ? n : x)));
+  /** Меняет конспект, опираясь на самую свежую его версию. */
+  function patchNote(id: string, patch: NotePatch) {
+    persist(notesRef.current.map((x) => (x.id === id ? { ...x, ...(typeof patch === "function" ? patch(x) : patch) } : x)));
   }
 
   async function transcribe(blob: Blob) {
@@ -205,6 +282,7 @@ export default function Home() {
   }
 
   async function handle(m: Material, wishes: string) {
+    const subjectForNew = page === "subject" ? subjectId : null;
     setError(null);
     setDraft("");
     setCurrentId(null);
@@ -225,9 +303,11 @@ export default function Home() {
         source: m.source,
         summary,
         transcript,
+        subjectId: subjectForNew ?? undefined,
       };
       persist([note, ...notesRef.current]);
       setCurrentId(note.id);
+      setCreateTab(null);
       setDraft("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -242,153 +322,263 @@ export default function Home() {
   }
 
   const current = notes.find((n) => n.id === currentId) || null;
+  const openedSubject = subjects.find((s) => s.id === subjectId) || null;
 
   if (session === undefined) return null;
   if (!session) return <LoginView onDone={login} />;
   const { user } = session;
 
-  const hasNotes = notes.length > 0;
-  const cardsKnown = notes.reduce((a, n) => a + (n.cardsKnown ?? 0), 0);
-  const cardsTotal = notes.reduce((a, n) => a + (n.flashcards?.length ?? 0), 0);
-  const scores = notes.flatMap((n) => (n.quizBest !== undefined ? [n.quizBest] : []));
-  const stats: [string, string, string, string][] = [
-    ["📚", String(notes.length), plural(notes.length, "конспект", "конспекта", "конспектов"), "#3b7bff"],
-    ["🃏", cardsTotal ? `${cardsKnown}/${cardsTotal}` : "0", "карточек выучено", "#10b981"],
-    ["🏆", scores.length ? `${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}%` : "—", "средний балл тестов", "#f97316"],
+  const showNote = current && (page === "home" || page === "subject");
+  const title = page === "chat" ? "Чат с нейросетью" : page === "settings" ? "Настройки" : page === "profile" ? "Личный кабинет" : showNote ? "Конспект" : openedSubject ? openedSubject.name : "Главная";
+
+  const SOURCES: [Tab, string, string, string][] = [
+    ["voice", "mic", "Записать аудио", "#ef4444"],
+    ["file", "upload", "Загрузить файл", "#3b7bff"],
+    ["link", "link", "Вставить ссылку", "#10b981"],
+    ["text", "text", "Вставить текст", "#f59e0b"],
   ];
-  const q = sideQuery.trim().toLowerCase();
-  const sideNotes = (q ? notes.filter((n) => n.title.toLowerCase().includes(q)) : notes).slice(0, 30);
-  const title = page === "settings" ? "Настройки" : page === "profile" ? "Личный кабинет" : current ? current.title : stage || draft ? "Новый конспект" : "Главная";
+
+  const createBlock = (
+    <>
+      {!stage && !draft && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {SOURCES.map(([id, icon, label, color]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setCreateTab(createTab === id ? null : id)}
+              className={`card lift flex flex-col items-center justify-center gap-2.5 px-3 py-5 text-center sm:gap-3 sm:py-8 ${createTab === id ? "!border-accent ring-2 ring-accent/30" : ""}`}
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>
+                <Icon name={icon} className="h-6 w-6" />
+              </span>
+              <span className="text-sm font-medium sm:text-base">{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!stage && createTab && (
+        <div className="pop-in mt-3">
+          <InputPanel key={createTab} tab={createTab} busy={!!stage} onSubmit={handle} />
+        </div>
+      )}
+      {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
+      {stage && !draft && <div className="card mt-2"><Spinner text={stage} /></div>}
+      {draft && (
+        <div className="card mt-2 p-4 sm:p-8">
+          {stage && <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />{stage}</div>}
+          <Markdown>{draft}</Markdown>
+        </div>
+      )}
+    </>
+  );
+
+  const homeTabs = (
+    <div className="inline-flex rounded-2xl border border-line bg-surface p-1">
+      {([["notes", "📝", "Конспекты"], ["subjects", "📁", "Предметы"]] as const).map(([id, icon, label]) => (
+        <button key={id} type="button" onClick={() => setHomeTab(id)} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition sm:px-4 ${homeTab === id ? "bg-accent/15 text-accent" : "text-muted hover:text-foreground"}`}>
+          <span>{icon}</span>{label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const railItem = (id: Page, icon: string, label: string) => {
+    const active = page === id && !showNote;
+    return (
+      <button key={id} type="button" onClick={() => go(id)} title={label} aria-label={label} className={`flex h-12 w-12 items-center justify-center rounded-2xl transition ${active ? "bg-accent text-white shadow-lg shadow-accent/30" : "text-muted hover:bg-foreground/5 hover:text-foreground"}`}>
+        <Icon name={icon} />
+      </button>
+    );
+  };
 
   return (
     <div className="flex min-h-screen">
-      <aside className={`no-print fixed inset-y-0 left-0 z-30 flex w-72 transform flex-col border-r border-line bg-surface transition-transform md:sticky md:top-0 md:h-screen md:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between px-5 pb-3 pt-5">
-          <button type="button" onClick={() => go("home")} className="text-lg font-bold tracking-tight"><span className="text-accent">Конспект</span>ор</button>
-          <button type="button" onClick={() => setMenuOpen(false)} className="btn-icon md:hidden" aria-label="Закрыть меню"><Icon name="close" /></button>
-        </div>
-        <div className="px-4">
-          <button type="button" onClick={() => go("home")} className="btn-primary flex w-full items-center justify-center gap-2 !py-2.5"><Icon name="plus" className="h-4 w-4" />Новый конспект</button>
-        </div>
-        <nav className="mt-4 flex flex-col gap-0.5 px-3">
-          {NAV.map(([id, icon, label]) => {
-            const active = page === id && !(id === "home" && currentId);
-            return (
-              <button key={id} type="button" onClick={() => go(id)} className={`nav-item ${active ? "nav-item-active" : ""}`}>
-                <Icon name={icon} className="h-[18px] w-[18px]" />
-                {label}
-              </button>
-            );
-          })}
-        </nav>
-
-        {hasNotes && (
-          <div className="mt-5 flex min-h-0 flex-1 flex-col border-t border-line pt-4">
-            <div className="flex items-center justify-between px-5 text-xs font-semibold uppercase tracking-wider text-muted">
-              Мои конспекты <span className="font-normal normal-case tracking-normal">{notes.length}</span>
-            </div>
-            {notes.length > 5 && (
-              <div className="relative mx-4 mt-2">
-                <Icon name="search" className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                <input value={sideQuery} onChange={(e) => setSideQuery(e.target.value)} placeholder="Найти…" className="input !rounded-lg !py-1.5 !pl-8 text-sm" />
-              </div>
-            )}
-            <ul className="mt-2 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-              {sideNotes.map((n) => (
-                <li key={n.id}>
-                  <button type="button" onClick={() => openNote(n.id)} className={`nav-item w-full !py-2 ${currentId === n.id && page === "home" ? "nav-item-active" : ""}`}>
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base" style={{ background: `color-mix(in srgb, ${noteColor(n.id)} 20%, transparent)` }}>{splitTitle(n.title).emoji}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{splitTitle(n.title).text}</span>
-                      <span className="block text-xs font-normal text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-              {sideNotes.length === 0 && <li className="px-3 py-2 text-sm text-muted">Ничего не найдено</li>}
-            </ul>
-          </div>
-        )}
-
-        <button type="button" onClick={() => go("profile")} className="m-3 mt-auto flex items-center gap-3 rounded-xl p-2.5 text-left transition hover:bg-foreground/5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white">{user.firstName[0].toUpperCase()}</span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{fullName(user)}</span>
-            <span className="block truncate text-xs text-muted">{user.group} · {notes.length} {plural(notes.length, "конспект", "конспекта", "конспектов")}</span>
-          </span>
+      {/* Узкая панель слева на компьютере */}
+      <aside className="no-print sticky top-0 hidden h-screen w-20 shrink-0 flex-col items-center gap-2 border-r border-line bg-surface py-5 md:flex">
+        <button type="button" onClick={() => go("home")} className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-violet-500 text-xl font-black text-white" title="Конспектор">К</button>
+        <button type="button" onClick={newNote} title="Новый конспект" aria-label="Новый конспект" className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-dashed border-line text-muted transition hover:border-accent hover:text-accent">
+          <Icon name="plus" />
+        </button>
+        {NAV.map(([id, icon, label]) => railItem(id, icon, label))}
+        <button type="button" onClick={() => go("profile")} title={fullName(user)} className="mt-auto flex h-11 w-11 items-center justify-center rounded-full bg-accent font-bold text-white">
+          {user.firstName[0].toUpperCase()}
         </button>
       </aside>
-      {menuOpen && <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setMenuOpen(false)} />}
+
+      {/* Меню на телефоне */}
+      <aside className={`no-print fixed inset-y-0 left-0 z-40 flex w-72 transform flex-col border-r border-line bg-surface p-4 transition-transform md:hidden ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-lg font-bold"><span className="text-accent">Конспект</span>ор</div>
+          <button type="button" onClick={() => setMenuOpen(false)} className="btn-icon" aria-label="Закрыть меню"><Icon name="close" /></button>
+        </div>
+        <button type="button" onClick={newNote} className="btn-primary mb-4 flex items-center justify-center gap-2 !py-2.5"><Icon name="plus" className="h-4 w-4" />Новый конспект</button>
+        {NAV.map(([id, icon, label]) => (
+          <button key={id} type="button" onClick={() => go(id)} className={`nav-item ${page === id && !showNote ? "nav-item-active" : ""}`}>
+            <Icon name={icon} className="h-[18px] w-[18px]" />{label}
+          </button>
+        ))}
+        {subjects.length > 0 && (
+          <>
+            <div className="mt-5 px-3 text-xs font-semibold uppercase tracking-wider text-muted">Предметы</div>
+            <div className="mt-1 flex min-h-0 flex-col overflow-y-auto">
+              {subjects.map((s) => (
+                <button key={s.id} type="button" onClick={() => openSubject(s.id)} className={`nav-item ${subjectId === s.id && !showNote ? "nav-item-active" : ""}`}>
+                  <span className="h-3 w-3 rounded-full" style={{ background: s.color }} />{s.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="mt-auto flex items-center gap-3 rounded-xl p-2 text-sm">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent font-bold text-white">{user.firstName[0].toUpperCase()}</span>
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{fullName(user)}</span>
+            <span className="block truncate text-xs text-muted">{user.group} · {notes.length} {plural(notes.length, "конспект", "конспекта", "конспектов")}</span>
+          </span>
+        </div>
+      </aside>
+      {menuOpen && <div className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setMenuOpen(false)} />}
 
       <main className="min-w-0 flex-1">
-        <header className="no-print sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-line bg-background/80 px-3 backdrop-blur sm:px-6">
-          <button type="button" onClick={() => setMenuOpen(true)} className="btn-icon md:hidden" aria-label="Меню"><Icon name="menu" /></button>
-          {(current || page !== "home") && (
-            <button type="button" onClick={() => go("home")} className="btn-icon" aria-label="На главную"><Icon name="back" /></button>
-          )}
+        <header className="no-print sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-line bg-background/80 px-3 backdrop-blur md:hidden">
+          <button type="button" onClick={() => setMenuOpen(true)} className="btn-icon" aria-label="Меню"><Icon name="menu" /></button>
           <div className="min-w-0 flex-1 truncate font-semibold">{title}</div>
-          {(current || page !== "home") && (
-            <button type="button" onClick={() => go("home")} className="btn-secondary hidden items-center gap-1.5 !py-1.5 text-sm sm:flex"><Icon name="plus" className="h-4 w-4" />Новый</button>
-          )}
+          <button type="button" onClick={newNote} className="btn-icon" aria-label="Новый конспект"><Icon name="plus" /></button>
         </header>
 
-        <div className="mx-auto max-w-4xl px-4 py-6 sm:px-8 sm:py-10">
+        <div className={`mx-auto px-4 py-6 sm:px-8 sm:py-10 ${showNote ? "max-w-[1400px] pb-28 xl:pb-10" : "max-w-4xl"}`}>
           {page === "settings" && <SettingsView settings={settings} onChange={changeSettings} />}
           {page === "profile" && <ProfileView user={user} notes={notes} cloud={cloud} syncError={syncError} onLogout={() => login(null)} onNotes={persist} onOpen={openNote} />}
-          {page === "home" && !current && (
+
+          {page === "home" && !showNote && (
             <>
-              {!stage && !draft && (hasNotes ? (
-                <div className="fade-up mb-6">
-                  <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Привет, {user.firstName}! 👋</h1>
-                  <p className="mt-1 text-muted">Запишите лекцию, загрузите файл или вставьте ссылку — конспект будет готов через минуту.</p>
-                  <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
-                    {stats.map(([icon, value, label, color]) => (
-                      <div key={label} className="card p-3 sm:p-4" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${color} 22%, var(--surface)), var(--surface))` }}>
-                        <div className="text-xl sm:text-2xl">{icon}</div>
-                        <div className="mt-1 text-xl font-bold sm:text-2xl">{value}</div>
-                        <div className="text-xs text-muted sm:text-sm">{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mb-8 text-center">
-                  <h1 className="text-3xl font-extrabold tracking-tight sm:text-5xl">
-                    Готовься к экзаменам <span className="bg-gradient-to-r from-accent via-violet-500 to-pink-500 bg-clip-text text-transparent">в 10 раз быстрее</span>
-                  </h1>
-                  <p className="mx-auto mt-4 max-w-2xl text-muted sm:text-lg">
-                    Запишите лекцию, загрузите файл или вставьте ссылку. Нейросеть сделает чёткий конспект, а из него карточки, тесты, шпаргалку и перевод на любой язык.
-                  </p>
-                </div>
-              ))}
-              {!stage && <InputPanel busy={!!stage} onSubmit={handle} />}
-              {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
-              {!stage && !draft && <NotesSearch notes={notes} onOpen={openNote} onRemove={remove} />}
-              {stage && !draft && <Spinner text={stage} />}
-              {draft && (
-                <div className="card mt-2 p-4 sm:p-8">
-                  {stage && <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />{stage}</div>}
-                  <Markdown>{draft}</Markdown>
-                </div>
-              )}
-              {!stage && !draft && !hasNotes && (
-                <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                  {[
-                    ["🎙️", "Любой источник", "Диктофон, аудио и видео, PDF, Word, фото, статьи и YouTube."],
-                    ["🧠", "Умный конспект", "Структура, термины, определения и вопросы для самопроверки."],
-                    ["🃏", "Учи, а не читай", "Флеш-карточки, тесты, шпаргалки, интеллект-карты и перевод."],
-                  ].map(([icon, title, text]) => (
-                    <div key={title} className="card lift p-5">
-                      <div className="text-2xl">{icon}</div>
-                      <div className="mt-2 font-semibold">{title}</div>
-                      <div className="mt-1 text-sm text-muted">{text}</div>
-                    </div>
-                  ))}
-                </div>
+              <div className="fade-up mb-6">
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Создать конспект</h1>
+                <p className="mt-1 text-muted">Запиши лекцию, загрузи файл, вставь ссылку или текст — нейросеть сделает чёткий конспект.</p>
+              </div>
+              {createBlock}
+              {!stage && !draft && (
+                <>
+                  <hr className="my-8 border-line" />
+                  {homeTab === "notes" ? (
+                    <NotesList toolbar={homeTabs} notes={notes} subjects={subjects} onOpen={openNote} onRemove={remove} emptyText="Здесь появятся ваши конспекты. Начните с записи лекции или файла." />
+                  ) : (
+                    <Subjects toolbar={homeTabs} subjects={subjects} notes={notes} onOpen={openSubject} onChange={changeSubjects} />
+                  )}
+                </>
               )}
             </>
           )}
-          {page === "home" && current && <NoteView key={current.id} note={current} onChange={updateNote} onRemove={() => window.confirm(`Удалить конспект «${current.title}»?`) && remove(current.id)} />}
+
+          {page === "chat" && (
+            <div className="card fade-up mx-auto h-[calc(100vh-9rem)] max-w-3xl overflow-hidden md:h-[calc(100vh-5rem)]">
+              <ChatPanel messages={chat} update={updateChat} />
+            </div>
+          )}
+
+          {page === "subject" && !showNote && (
+            openedSubject ? (
+              <>
+                <nav className="mb-4 flex items-center gap-1.5 text-sm text-muted">
+                  <button type="button" onClick={() => { go("home"); setHomeTab("subjects"); }} className="hover:text-foreground">Предметы</button>
+                  <Icon name="chevron" className="h-3.5 w-3.5" />
+                  <span className="text-foreground">{openedSubject.name}</span>
+                </nav>
+                <div className="fade-up mb-6 flex items-center gap-4">
+                  <span className="flex h-14 w-14 items-center justify-center rounded-2xl text-white" style={{ background: openedSubject.color }}><Icon name="folder" className="h-7 w-7" /></span>
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{openedSubject.name}</h1>
+                    <p className="text-muted">{notes.filter((n) => n.subjectId === openedSubject.id).length} {plural(notes.filter((n) => n.subjectId === openedSubject.id).length, "конспект", "конспекта", "конспектов")}</p>
+                  </div>
+                </div>
+                <div className="mb-8">{createBlock}</div>
+                {!stage && !draft && (
+                  <div className="mb-2 flex justify-end">
+                    <button type="button" onClick={() => setAdding(new Set())} className="btn-secondary flex items-center gap-2 rounded-full">
+                      <Icon name="plus" className="h-4 w-4" />Добавить конспекты
+                    </button>
+                  </div>
+                )}
+                {adding && (
+                  <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center" onClick={() => setAdding(null)}>
+                    <div className="pop-in flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-line bg-surface sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between border-b border-line p-4">
+                        <div className="font-semibold">Добавить в «{openedSubject.name}»</div>
+                        <button type="button" onClick={() => setAdding(null)} className="btn-icon" aria-label="Закрыть"><Icon name="close" /></button>
+                      </div>
+                      <ul className="flex-1 overflow-y-auto p-2">
+                        {notes.filter((n) => n.subjectId !== openedSubject.id).length === 0 && <li className="p-6 text-center text-sm text-muted">Все конспекты уже в этом предмете.</li>}
+                        {notes
+                          .filter((n) => n.subjectId !== openedSubject.id)
+                          .map((n) => {
+                            const other = subjects.find((x) => x.id === n.subjectId);
+                            const on = adding.has(n.id);
+                            return (
+                              <li key={n.id}>
+                                <label className={`flex cursor-pointer items-center gap-3 rounded-xl p-3 transition ${on ? "bg-accent/10" : "hover:bg-foreground/5"}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => {
+                                      const next = new Set(adding);
+                                      if (on) next.delete(n.id);
+                                      else next.add(n.id);
+                                      setAdding(next);
+                                    }}
+                                    className="h-5 w-5 accent-[var(--accent)]"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium">{n.title}</span>
+                                    <span className="block text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")}{other ? ` · сейчас в «${other.name}»` : ""}</span>
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                      </ul>
+                      <div className="border-t border-line p-4">
+                        <button
+                          type="button"
+                          disabled={!adding.size}
+                          onClick={() => {
+                            persist(notesRef.current.map((n) => (adding.has(n.id) ? { ...n, subjectId: openedSubject.id } : n)));
+                            setAdding(null);
+                          }}
+                          className="btn-primary w-full"
+                        >
+                          Добавить {adding.size ? `(${adding.size})` : ""}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!stage && !draft && (
+                  <NotesList
+                    notes={notes.filter((n) => n.subjectId === openedSubject.id)}
+                    subjects={subjects}
+                    onOpen={openNote}
+                    onRemove={remove}
+                    emptyText="В этом предмете пока нет конспектов. Создайте новый выше или откройте готовый конспект и нажмите «В предмет»."
+                  />
+                )}
+              </>
+            ) : (
+              <p className="text-muted">Предмет не найден.</p>
+            )
+          )}
+
+          {showNote && current && (
+            <NoteView
+              key={current.id}
+              note={current}
+              subjects={subjects}
+              onPatch={(p) => patchNote(current.id, p)}
+              onRemove={() => window.confirm(`Удалить конспект «${current.title}»?`) && remove(current.id)}
+              onHome={() => go("home")}
+              onSubject={openSubject}
+            />
+          )}
         </div>
       </main>
     </div>

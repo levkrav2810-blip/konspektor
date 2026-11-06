@@ -4,75 +4,58 @@ import { useState } from "react";
 import Markdown from "./Markdown";
 import Flashcards from "./Flashcards";
 import Quiz from "./Quiz";
-import { downloadText, noteColor, noteProgress, postJson, postStream, splitTitle, type Flashcard, type Note, type QuizQuestion } from "@/lib/client";
+import ChatPanel from "./ChatPanel";
+import Icon from "./Icon";
+import Slides from "./Slides";
+import Podcast from "./Podcast";
+import RunnerGame from "./RunnerGame";
+import MatchGame from "./MatchGame";
+import { downloadText, noteColor, noteProgress, postJson, postStream, splitTitle, type Flashcard, type GameItem, type Note, type PodcastLine, type QuizQuestion, type Slide, type Subject } from "@/lib/client";
 
 const LANGUAGES = ["English", "Русский", "Українська", "Deutsch", "Français", "Español", "Italiano", "Português", "Polski", "Türkçe", "中文", "日本語", "한국어", "العربية", "Қазақша", "O‘zbekcha"];
 
-const ACTIONS = [
-  { id: "simplify", label: "Объяснить проще" },
-  { id: "short", label: "Шпаргалка" },
-  { id: "mindmap", label: "Интеллект-карта" },
-  { id: "plan", label: "План ответа" },
+/** Изменение конспекта: поля или функция от самой свежей версии (ответы нейросети приходят не сразу). */
+export type NotePatch = Partial<Note> | ((n: Note) => Partial<Note>);
+
+const TRANSFORMS = [
+  { id: "simplify", label: "Объяснить проще", icon: "🧒" },
+  { id: "short", label: "Шпаргалка", icon: "📋" },
+  { id: "mindmap", label: "Интеллект-карта", icon: "🗺️" },
+  { id: "plan", label: "План ответа", icon: "🎤" },
 ];
 
 type View = "summary" | "cards" | "quiz" | "transcript" | string;
 
-export default function NoteView({ note, onChange, onRemove }: { note: Note; onChange: (n: Note) => void; onRemove?: () => void }) {
+export default function NoteView({
+  note,
+  subjects,
+  onPatch,
+  onRemove,
+  onHome,
+  onSubject,
+}: {
+  note: Note;
+  subjects: Subject[];
+  onPatch: (p: NotePatch) => void;
+  onRemove: () => void;
+  onHome: () => void;
+  onSubject: (id: string) => void;
+}) {
   const [view, setView] = useState<View>("summary");
   const [loading, setLoading] = useState<string | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [translating, setTranslating] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [gameMode, setGameMode] = useState<"runner" | "match">("runner");
 
   // Конспект на выбранном языке; карточки, тест и остальное делаются из него же.
   const lang = note.lang || "";
   const summary = (lang && note.translations?.[lang]) || note.summary;
-
-  /** Переключает язык конспекта сразу: готовый перевод показывается мгновенно, новый пишется на глазах. */
-  async function changeLanguage(next: string) {
-    setView("summary");
-    if (!next || note.translations?.[next]) {
-      onChange({ ...note, lang: next });
-      return;
-    }
-    setTranslating(next);
-    setStreaming("");
-    await run("translate", async () => {
-      const content = await postStream("/api/transform", { summary: note.summary, kind: "translate", language: next }, setStreaming);
-      onChange({ ...note, lang: next, translations: { ...note.translations, [next]: content } });
-    });
-    setStreaming(null);
-    setTranslating(null);
-  }
-
-  async function makeCards() {
-    setView("cards");
-    if (note.flashcards?.length) return;
-    await run("cards", async () => {
-      const { cards } = await postJson<{ cards: Flashcard[] }>("/api/flashcards", { summary });
-      onChange({ ...note, flashcards: cards });
-    });
-  }
-
-  async function makeQuiz(force = false) {
-    setView("quiz");
-    if (note.quiz?.length && !force) return;
-    await run("quiz", async () => {
-      const { questions } = await postJson<{ questions: QuizQuestion[] }>("/api/quiz", { summary });
-      onChange({ ...note, quiz: questions, quizBest: undefined });
-    });
-  }
-
-  async function transform(kind: string, label: string) {
-    const id = `${kind}-${crypto.randomUUID()}`;
-    setView(id);
-    await run(id, async () => {
-      const content = await postStream("/api/transform", { summary, kind }, setStreaming);
-      onChange({ ...note, extras: [...(note.extras || []), { id, label, content }] });
-    });
-    setStreaming(null);
-  }
+  const subject = subjects.find((s) => s.id === note.subjectId);
+  const { emoji, text: titleText } = splitTitle(note.title);
+  const progress = noteProgress(note);
 
   async function run(key: string, fn: () => Promise<void>) {
     setError(null);
@@ -86,6 +69,69 @@ export default function NoteView({ note, onChange, onRemove }: { note: Note; onC
     }
   }
 
+  /** Переключает язык конспекта: готовый перевод показывается мгновенно, новый пишется на глазах. */
+  async function changeLanguage(next: string) {
+    setView("summary");
+    if (!next || note.translations?.[next]) {
+      onPatch({ lang: next });
+      return;
+    }
+    setTranslating(next);
+    setStreaming("");
+    await run("translate", async () => {
+      const content = await postStream("/api/transform", { summary: note.summary, kind: "translate", language: next }, setStreaming);
+      onPatch((n) => ({ lang: next, translations: { ...n.translations, [next]: content } }));
+    });
+    setStreaming(null);
+    setTranslating(null);
+  }
+
+  async function makeCards() {
+    setView("cards");
+    if (note.flashcards?.length) return;
+    await run("cards", async () => {
+      const { cards } = await postJson<{ cards: Flashcard[] }>("/api/flashcards", { summary });
+      onPatch({ flashcards: cards, cardsKnown: undefined });
+    });
+  }
+
+  async function makeQuiz(force = false) {
+    setView("quiz");
+    if (note.quiz?.length && !force) return;
+    await run("quiz", async () => {
+      const { questions } = await postJson<{ questions: QuizQuestion[] }>("/api/quiz", { summary });
+      onPatch({ quiz: questions, quizBest: undefined });
+    });
+  }
+
+  /** Презентация, подкаст или игра: открывает готовое или просит нейросеть сделать новое. */
+  async function makeJson(kind: "slides" | "podcast" | "game", force = false) {
+    setView(kind);
+    if (note[kind]?.length && !force) return;
+    await run(kind, async () => {
+      const data = await postJson<{ slides?: Slide[]; lines?: PodcastLine[]; items?: GameItem[] }>("/api/generate", { summary, kind });
+      if (kind === "slides") onPatch({ slides: data.slides });
+      if (kind === "podcast") onPatch({ podcast: data.lines });
+      if (kind === "game") onPatch({ game: (data.items || []).filter((x) => x.wrong.length >= 2) });
+    });
+  }
+
+  /** Открывает готовую переработку (шпаргалку и т. п.) или делает новую. */
+  async function transform(kind: string, label: string, force = false) {
+    const existing = note.extras?.find((x) => x.id.startsWith(`${kind}-`));
+    if (existing && !force) return setView(existing.id);
+    const id = `${kind}-${crypto.randomUUID()}`;
+    setView(id);
+    setStreaming("");
+    await run(id, async () => {
+      const content = await postStream("/api/transform", { summary, kind }, setStreaming);
+      onPatch((n) => ({ extras: [...(n.extras || []).filter((x) => !x.id.startsWith(`${kind}-`)), { id, label, content }] }));
+    });
+    setStreaming(null);
+  }
+
+  const updateChat = (fn: (m: NonNullable<Note["chat"]>) => NonNullable<Note["chat"]>) => onPatch((n) => ({ chat: fn(n.chat ?? []) }));
+
   const extra = note.extras?.find((x) => x.id === view);
   const currentText = view === "summary" ? summary : view === "transcript" ? note.transcript || "" : extra?.content || "";
 
@@ -95,96 +141,217 @@ export default function NoteView({ note, onChange, onRemove }: { note: Note; onC
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const tabs: { id: View; label: string; onClick: () => void }[] = [
-    { id: "summary", label: "📝 Конспект", onClick: () => setView("summary") },
-    { id: "cards", label: "🃏 Карточки", onClick: makeCards },
-    { id: "quiz", label: "✅ Тест", onClick: () => makeQuiz() },
-    ...(note.extras || []).map((x) => ({ id: x.id, label: x.label, onClick: () => setView(x.id) })),
-    ...(note.transcript ? [{ id: "transcript", label: "🎧 Расшифровка", onClick: () => setView("transcript") }] : []),
+  const tiles: { key: string; icon: string; label: string; hint?: string; onClick: () => void; wide?: boolean }[] = [
+    { key: "quiz", icon: "✅", label: "Пройти тест", hint: note.quizBest !== undefined ? `Лучший результат ${note.quizBest}%` : note.quiz?.length ? `${note.quiz.length} вопросов` : undefined, onClick: () => makeQuiz() },
+    { key: "cards", icon: "🃏", label: "Учить флеш-карточки", hint: note.flashcards?.length ? `Выучено ${note.cardsKnown ?? 0} из ${note.flashcards.length}` : undefined, onClick: makeCards },
+    { key: "slides", icon: "🧑‍🏫", label: "Создать презентацию", hint: note.slides?.length ? `${note.slides.length} слайдов` : undefined, onClick: () => makeJson("slides") },
+    { key: "podcast", icon: "🎙️", label: "Слушать подкаст", hint: note.podcast?.length ? "Готов" : undefined, onClick: () => makeJson("podcast") },
+    { key: "game", icon: "🎮", label: "Учебные игры", hint: note.gameBest ? `Рекорд ${note.gameBest}` : "Забег знаний и «Найди пару»", onClick: () => makeJson("game") },
+    ...TRANSFORMS.map((t) => ({
+      key: t.id,
+      icon: t.icon,
+      label: t.label,
+      hint: note.extras?.some((x) => x.id.startsWith(`${t.id}-`)) ? "Готово" : undefined,
+      onClick: () => transform(t.id, t.label),
+    })),
   ];
-  if (loading && loading.includes("-") && !extra) tabs.push({ id: loading, label: "…", onClick: () => {} });
 
-  const { emoji, text: titleText } = splitTitle(note.title);
-  const progress = noteProgress(note);
+  const viewTitle =
+    view === "slides" ? "🧑‍🏫 Презентация" : view === "podcast" ? "🎙️ Подкаст" : view === "game" ? "🎮 Учебные игры" : view === "cards" ? "🃏 Флеш-карточки" : view === "quiz" ? "✅ Тест" : view === "transcript" ? "📄 Расшифровка" : extra ? extra.label : TRANSFORMS.find((t) => view.startsWith(`${t.id}-`))?.label;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="no-print card fade-up relative overflow-hidden p-5 sm:p-6" style={{ ["--c" as string]: noteColor(note.id), background: "linear-gradient(120deg, color-mix(in srgb, var(--c) 22%, var(--surface)), var(--surface) 70%)" }}>
-        <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-3xl" style={{ background: "color-mix(in srgb, var(--c) 25%, transparent)" }}>{emoji}</div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold leading-tight sm:text-2xl">{titleText}</h1>
-            <div className="mt-1 truncate text-sm text-muted">
-              {new Date(note.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })} · {note.source}
+    <div className="flex gap-6">
+      <div className="min-w-0 flex-1">
+        <nav className="no-print mb-4 flex flex-wrap items-center gap-1.5 text-sm text-muted">
+          <button type="button" onClick={onHome} className="hover:text-foreground">Главная</button>
+          <Icon name="chevron" className="h-3.5 w-3.5" />
+          {subject && (
+            <>
+              <button type="button" onClick={() => onSubject(subject.id)} className="hover:text-foreground">{subject.name}</button>
+              <Icon name="chevron" className="h-3.5 w-3.5" />
+            </>
+          )}
+          <span className="text-foreground">Конспект</span>
+        </nav>
+
+        <h1 className="flex items-start gap-3 text-2xl font-bold leading-tight sm:text-3xl">
+          <span>{emoji}</span>
+          <span className="min-w-0">{titleText}</span>
+        </h1>
+
+        <div className="no-print mt-4 flex flex-wrap items-center gap-2 text-sm">
+          <label className="relative inline-flex cursor-pointer items-center gap-2 rounded-full border border-line bg-surface py-1.5 pl-3 pr-3 transition hover:border-accent/60">
+            {subject ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: subject.color }} /> : <Icon name="folder" className="h-4 w-4 text-muted" />}
+            <span>{subject ? subject.name : "В предмет"}</span>
+            <select
+              value={note.subjectId ?? ""}
+              onChange={(e) => onPatch({ subjectId: e.target.value || undefined })}
+              className="absolute inset-0 cursor-pointer opacity-0"
+              aria-label="Предмет"
+            >
+              <option value="">Без предмета</option>
+              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <span className="text-muted">{new Date(note.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+          <label className="ml-auto inline-flex items-center gap-1.5 text-muted">
+            🌍
+            <select
+              value={translating ?? lang}
+              onChange={(e) => changeLanguage(e.target.value)}
+              disabled={!!loading}
+              aria-label="Язык конспекта"
+              className="input !w-auto !rounded-full !py-1.5 text-sm text-foreground"
+            >
+              <option value="">Язык оригинала</option>
+              {LANGUAGES.map((l) => <option key={l} value={l}>{l}{note.translations?.[l] ? " ✓" : ""}</option>)}
+            </select>
+          </label>
+        </div>
+        {subjects.length === 0 && !note.subjectId && (
+          <p className="no-print mt-2 text-xs text-muted">Чтобы разложить конспекты по папкам, создайте предмет на главной во вкладке «Предметы».</p>
+        )}
+
+        {progress !== null && (
+          <div className="no-print mt-4 flex items-center gap-3">
+            <div className="progress flex-1" style={{ ["--accent" as string]: noteColor(note.id) }}><div style={{ width: `${progress}%` }} /></div>
+            <span className="text-sm font-medium text-muted">Прогресс {progress}%</span>
+          </div>
+        )}
+
+        {error && <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
+
+        {view === "summary" ? (
+          <>
+            {note.transcript && (
+              <button type="button" onClick={() => setView("transcript")} className="tile no-print mt-6 sm:w-1/2">
+                <span className="tile-icon">📄</span>
+                <span className="flex-1 font-semibold text-accent">Показать расшифровку</span>
+                <Icon name="chevron" className="h-5 w-5 text-muted" />
+              </button>
+            )}
+            <div className="no-print mt-6 border-t border-line pt-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {tiles.map((t) => (
+                  <button key={t.key} type="button" onClick={t.onClick} disabled={!!loading} className="tile">
+                    <span className="tile-icon">{t.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold text-accent">{t.label}</span>
+                      {t.hint && <span className="block text-xs text-muted">{t.hint}</span>}
+                    </span>
+                    <Icon name="chevron" className="h-5 w-5 text-muted" />
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
-              {note.flashcards?.length ? <span className="badge">🃏 {note.cardsKnown ?? 0}/{note.flashcards.length} карточек</span> : null}
-              {note.quiz?.length ? <span className="badge">✅ Тест: {note.quizBest !== undefined ? `${note.quizBest}%` : "не пройден"}</span> : null}
-              {progress !== null && <span className="badge">📈 Прогресс {progress}%</span>}
-              {!note.flashcards?.length && !note.quiz?.length && <span className="badge">✨ Сделайте карточки и тест, чтобы видеть прогресс</span>}
+
+            <section className="mt-8">
+              <div className="no-print mb-2 flex flex-wrap items-center justify-end gap-1">
+                <button type="button" onClick={copy} className="btn-ghost">{copied ? "Скопировано ✓" : "Копировать"}</button>
+                <button type="button" onClick={() => downloadText(`${note.title}.md`, currentText)} className="btn-ghost">Скачать .md</button>
+                <button type="button" onClick={() => window.print()} className="btn-ghost">PDF / печать</button>
+                <button type="button" onClick={onRemove} className="btn-ghost hover:!text-red-500">Удалить</button>
+              </div>
+              <div className="card p-4 sm:p-8">
+                {translating ? (
+                  <>
+                    <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />Перевожу на {translating}…</div>
+                    {streaming ? <Markdown>{streaming}</Markdown> : <p className="text-muted">Начинаю перевод…</p>}
+                  </>
+                ) : (
+                  <Markdown>{summary}</Markdown>
+                )}
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="mt-6">
+            <div className="no-print mb-4 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setView("summary")} className="btn-secondary flex items-center gap-1 !py-2 text-sm">
+                <Icon name="back" className="h-4 w-4" />К конспекту
+              </button>
+              <h2 className="text-lg font-semibold">{viewTitle}</h2>
+              <div className="ml-auto flex gap-1">
+                {(view === "transcript" || extra) && (
+                  <>
+                    <button type="button" onClick={copy} className="btn-ghost">{copied ? "Скопировано ✓" : "Копировать"}</button>
+                    <button type="button" onClick={() => downloadText(`${note.title}.md`, currentText)} className="btn-ghost">Скачать .md</button>
+                  </>
+                )}
+                {extra && (
+                  <button type="button" onClick={() => transform(extra.id.split("-")[0], extra.label, true)} disabled={!!loading} className="btn-ghost">Сделать заново</button>
+                )}
+              </div>
             </div>
+
+            {(view === "transcript" || extra) && (
+              <div className="card p-4 sm:p-8">
+                {view === "transcript" ? <p className="whitespace-pre-wrap leading-relaxed">{currentText}</p> : <Markdown>{currentText}</Markdown>}
+              </div>
+            )}
+            {loading === view && streaming !== null && !extra && (
+              <div className="card p-4 sm:p-8">{streaming ? <Markdown>{streaming}</Markdown> : <Spinner text="Готовлю…" />}</div>
+            )}
+            {loading === view && streaming === null && (
+              <Spinner text={{ cards: "Делаю карточки…", quiz: "Составляю тест…", slides: "Собираю слайды…", podcast: "Пишу сценарий подкаста…", game: "Готовлю вопросы для игры…" }[view] || "Готовлю…"} />
+            )}
+            {view === "slides" && note.slides?.length && loading !== "slides" ? <Slides slides={note.slides} onRedo={() => makeJson("slides", true)} /> : null}
+            {view === "podcast" && note.podcast?.length && loading !== "podcast" ? (
+              <Podcast lines={note.podcast} onRedo={() => makeJson("podcast", true)} />
+            ) : null}
+            {view === "game" && note.game?.length && loading !== "game" ? (
+              <div>
+                <div className="mb-4 inline-flex rounded-2xl border border-line bg-surface p-1">
+                  {([["runner", "🏃 Забег знаний"], ["match", "🧩 Найди пару"]] as const).map(([id, label]) => (
+                    <button key={id} type="button" onClick={() => setGameMode(id)} className={`rounded-xl px-4 py-2 text-sm font-medium transition ${gameMode === id ? "bg-accent/15 text-accent" : "text-muted hover:text-foreground"}`}>{label}</button>
+                  ))}
+                </div>
+                {gameMode === "runner" ? (
+                  <RunnerGame
+                    key={note.game.length + note.game[0].question}
+                    items={note.game}
+                    best={note.gameBest}
+                    onScore={(sc) => onPatch((n) => (sc > (n.gameBest ?? 0) ? { gameBest: sc } : {}))}
+                    onRedo={() => makeJson("game", true)}
+                  />
+                ) : (
+                  <MatchGame key={note.game[0].question} items={note.game} />
+                )}
+              </div>
+            ) : null}
+            {view === "cards" && note.flashcards && loading !== "cards" && (
+              <Flashcards cards={note.flashcards} best={note.cardsKnown} onKnown={(k) => onPatch((n) => (k > (n.cardsKnown ?? 0) ? { cardsKnown: k } : {}))} />
+            )}
+            {view === "quiz" && note.quiz && loading !== "quiz" && (
+              <Quiz
+                key={note.quiz.length + note.quiz[0]?.question}
+                questions={note.quiz}
+                onRetry={() => makeQuiz(true)}
+                onScore={(p) => onPatch((n) => (p > (n.quizBest ?? -1) ? { quizBest: p } : {}))}
+              />
+            )}
+          </section>
+        )}
+      </div>
+
+      {/* Чат: колонка справа на широком экране, выезжающая панель на телефоне */}
+      <aside className="no-print sticky top-20 hidden h-[calc(100vh-6.5rem)] w-[360px] shrink-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm xl:block">
+        <ChatPanel messages={note.chat ?? []} update={updateChat} summary={summary} />
+      </aside>
+      <button
+        type="button"
+        onClick={() => setChatOpen(true)}
+        className="no-print fixed bottom-5 right-5 z-20 flex items-center gap-2 rounded-full bg-gradient-to-r from-accent to-violet-500 px-5 py-3.5 font-semibold text-white shadow-xl transition hover:brightness-110 xl:hidden"
+      >
+        <Icon name="chat" className="h-5 w-5" />Спросить нейросеть
+      </button>
+      {chatOpen && (
+        <div className="no-print fixed inset-0 z-40 flex flex-col bg-black/50 backdrop-blur-sm xl:hidden" onClick={() => setChatOpen(false)}>
+          <div className="pop-in mt-auto h-[85vh] overflow-hidden rounded-t-3xl border-t border-line bg-surface sm:mx-auto sm:mb-6 sm:h-[75vh] sm:w-[480px] sm:rounded-3xl sm:border" onClick={(e) => e.stopPropagation()}>
+            <ChatPanel messages={note.chat ?? []} update={updateChat} summary={summary} onClose={() => setChatOpen(false)} />
           </div>
         </div>
-        {progress !== null && <div className="progress mt-4" style={{ ["--accent" as string]: "var(--c)" }}><div style={{ width: `${progress}%` }} /></div>}
-      </div>
-
-      <div className="no-print flex flex-col-reverse gap-2 border-b border-line sm:flex-row sm:items-end">
-        <div className="-mx-4 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-          {tabs.map((t) => (
-            <button key={t.id} type="button" onClick={t.onClick} disabled={!!loading && t.id !== view} className={`tab ${view === t.id ? "tab-active" : ""}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-1.5 pb-2 text-sm text-muted sm:ml-auto">
-          🌍
-          <select
-            value={translating ?? lang}
-            onChange={(e) => changeLanguage(e.target.value)}
-            disabled={!!loading}
-            aria-label="Язык конспекта"
-            className="input !w-auto !rounded-lg !py-1.5 text-sm text-foreground"
-          >
-            <option value="">Язык оригинала</option>
-            {LANGUAGES.map((l) => <option key={l} value={l}>{l}{note.translations?.[l] ? " ✓" : ""}</option>)}
-          </select>
-        </label>
-      </div>
-
-      <div className="no-print -mx-4 flex items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
-        <span className="mr-1 shrink-0 text-sm text-muted">Сделать из конспекта:</span>
-        {ACTIONS.map((a) => (
-          <button key={a.id} type="button" onClick={() => transform(a.id, a.label)} disabled={!!loading} className="btn-chip shrink-0">{a.label}</button>
-        ))}
-      </div>
-
-      {error && <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
-
-      <div className="min-h-[300px]">
-        {view === "summary" && translating && (
-          <div className="card p-4 sm:p-8">
-            <div className="mb-4 flex items-center gap-2 text-sm text-accent"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />Перевожу на {translating}…</div>
-            {streaming ? <Markdown>{streaming}</Markdown> : <p className="text-muted">Начинаю перевод…</p>}
-          </div>
-        )}
-        {((view === "summary" && !translating) || view === "transcript" || extra) && (
-          <div className="card p-4 sm:p-8">
-            <div className="no-print -mt-2 mb-4 flex flex-wrap justify-end gap-1">
-              <button type="button" onClick={copy} className="btn-ghost">{copied ? "Скопировано ✓" : "Копировать"}</button>
-              <button type="button" onClick={() => downloadText(`${note.title}.md`, currentText)} className="btn-ghost">Скачать .md</button>
-              <button type="button" onClick={() => window.print()} className="btn-ghost">PDF / печать</button>
-              {onRemove && view === "summary" && <button type="button" onClick={onRemove} className="btn-ghost hover:!text-red-500">Удалить</button>}
-            </div>
-            {view === "transcript" ? <p className="whitespace-pre-wrap leading-relaxed">{currentText}</p> : <Markdown>{currentText}</Markdown>}
-          </div>
-        )}
-        {loading === view && streaming !== null && !extra && (
-          <div className="card p-4 sm:p-8"><Markdown>{streaming}</Markdown></div>
-        )}
-        {loading === view && streaming === null && <Spinner text={view === "cards" ? "Делаю карточки…" : view === "quiz" ? "Составляю тест…" : "Готовлю…"} />}
-        {view === "cards" && note.flashcards && loading !== "cards" && <Flashcards cards={note.flashcards} best={note.cardsKnown} onKnown={(k) => k > (note.cardsKnown ?? 0) && onChange({ ...note, cardsKnown: k })} />}
-        {view === "quiz" && note.quiz && loading !== "quiz" && <Quiz key={note.quiz.length + note.quiz[0]?.question} questions={note.quiz} onRetry={() => makeQuiz(true)} onScore={(p) => p > (note.quizBest ?? -1) && onChange({ ...note, quizBest: p })} />}
-      </div>
+      )}
     </div>
   );
 }
