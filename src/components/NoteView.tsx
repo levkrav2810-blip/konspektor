@@ -6,7 +6,11 @@ import Flashcards from "./Flashcards";
 import Quiz from "./Quiz";
 import ChatPanel from "./ChatPanel";
 import Icon from "./Icon";
-import { downloadText, noteColor, noteProgress, postJson, postStream, splitTitle, type Flashcard, type Note, type QuizQuestion, type Subject } from "@/lib/client";
+import Slides from "./Slides";
+import Podcast from "./Podcast";
+import RunnerGame from "./RunnerGame";
+import MatchGame from "./MatchGame";
+import { downloadText, noteColor, noteProgress, postJson, postStream, splitTitle, type Flashcard, type GameItem, type Note, type PodcastLine, type QuizQuestion, type Slide, type Subject } from "@/lib/client";
 
 const LANGUAGES = ["English", "Русский", "Українська", "Deutsch", "Français", "Español", "Italiano", "Português", "Polski", "Türkçe", "中文", "日本語", "한국어", "العربية", "Қазақша", "O‘zbekcha"];
 
@@ -44,6 +48,7 @@ export default function NoteView({
   const [translating, setTranslating] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [gameMode, setGameMode] = useState<"runner" | "match">("runner");
 
   // Конспект на выбранном языке; карточки, тест и остальное делаются из него же.
   const lang = note.lang || "";
@@ -99,6 +104,18 @@ export default function NoteView({
     });
   }
 
+  /** Презентация, подкаст или игра: открывает готовое или просит нейросеть сделать новое. */
+  async function makeJson(kind: "slides" | "podcast" | "game", force = false) {
+    setView(kind);
+    if (note[kind]?.length && !force) return;
+    await run(kind, async () => {
+      const data = await postJson<{ slides?: Slide[]; lines?: PodcastLine[]; items?: GameItem[] }>("/api/generate", { summary, kind });
+      if (kind === "slides") onPatch({ slides: data.slides });
+      if (kind === "podcast") onPatch({ podcast: data.lines });
+      if (kind === "game") onPatch({ game: (data.items || []).filter((x) => x.wrong.length >= 2) });
+    });
+  }
+
   /** Открывает готовую переработку (шпаргалку и т. п.) или делает новую. */
   async function transform(kind: string, label: string, force = false) {
     const existing = note.extras?.find((x) => x.id.startsWith(`${kind}-`));
@@ -113,6 +130,8 @@ export default function NoteView({
     setStreaming(null);
   }
 
+  const updateChat = (fn: (m: NonNullable<Note["chat"]>) => NonNullable<Note["chat"]>) => onPatch((n) => ({ chat: fn(n.chat ?? []) }));
+
   const extra = note.extras?.find((x) => x.id === view);
   const currentText = view === "summary" ? summary : view === "transcript" ? note.transcript || "" : extra?.content || "";
 
@@ -125,6 +144,9 @@ export default function NoteView({
   const tiles: { key: string; icon: string; label: string; hint?: string; onClick: () => void; wide?: boolean }[] = [
     { key: "quiz", icon: "✅", label: "Пройти тест", hint: note.quizBest !== undefined ? `Лучший результат ${note.quizBest}%` : note.quiz?.length ? `${note.quiz.length} вопросов` : undefined, onClick: () => makeQuiz() },
     { key: "cards", icon: "🃏", label: "Учить флеш-карточки", hint: note.flashcards?.length ? `Выучено ${note.cardsKnown ?? 0} из ${note.flashcards.length}` : undefined, onClick: makeCards },
+    { key: "slides", icon: "🧑‍🏫", label: "Создать презентацию", hint: note.slides?.length ? `${note.slides.length} слайдов` : undefined, onClick: () => makeJson("slides") },
+    { key: "podcast", icon: "🎙️", label: "Слушать подкаст", hint: note.podcast?.length ? "Готов" : undefined, onClick: () => makeJson("podcast") },
+    { key: "game", icon: "🎮", label: "Учебные игры", hint: note.gameBest ? `Рекорд ${note.gameBest}` : "Забег знаний и «Найди пару»", onClick: () => makeJson("game") },
     ...TRANSFORMS.map((t) => ({
       key: t.id,
       icon: t.icon,
@@ -135,7 +157,7 @@ export default function NoteView({
   ];
 
   const viewTitle =
-    view === "cards" ? "🃏 Флеш-карточки" : view === "quiz" ? "✅ Тест" : view === "transcript" ? "📄 Расшифровка" : extra ? extra.label : TRANSFORMS.find((t) => view.startsWith(`${t.id}-`))?.label;
+    view === "slides" ? "🧑‍🏫 Презентация" : view === "podcast" ? "🎙️ Подкаст" : view === "game" ? "🎮 Учебные игры" : view === "cards" ? "🃏 Флеш-карточки" : view === "quiz" ? "✅ Тест" : view === "transcript" ? "📄 Расшифровка" : extra ? extra.label : TRANSFORMS.find((t) => view.startsWith(`${t.id}-`))?.label;
 
   return (
     <div className="flex gap-6">
@@ -270,7 +292,33 @@ export default function NoteView({
             {loading === view && streaming !== null && !extra && (
               <div className="card p-4 sm:p-8">{streaming ? <Markdown>{streaming}</Markdown> : <Spinner text="Готовлю…" />}</div>
             )}
-            {loading === view && streaming === null && <Spinner text={view === "cards" ? "Делаю карточки…" : view === "quiz" ? "Составляю тест…" : "Готовлю…"} />}
+            {loading === view && streaming === null && (
+              <Spinner text={{ cards: "Делаю карточки…", quiz: "Составляю тест…", slides: "Собираю слайды…", podcast: "Пишу сценарий подкаста…", game: "Готовлю вопросы для игры…" }[view] || "Готовлю…"} />
+            )}
+            {view === "slides" && note.slides?.length && loading !== "slides" ? <Slides slides={note.slides} onRedo={() => makeJson("slides", true)} /> : null}
+            {view === "podcast" && note.podcast?.length && loading !== "podcast" ? (
+              <Podcast lines={note.podcast} onRedo={() => makeJson("podcast", true)} />
+            ) : null}
+            {view === "game" && note.game?.length && loading !== "game" ? (
+              <div>
+                <div className="mb-4 inline-flex rounded-2xl border border-line bg-surface p-1">
+                  {([["runner", "🏃 Забег знаний"], ["match", "🧩 Найди пару"]] as const).map(([id, label]) => (
+                    <button key={id} type="button" onClick={() => setGameMode(id)} className={`rounded-xl px-4 py-2 text-sm font-medium transition ${gameMode === id ? "bg-accent/15 text-accent" : "text-muted hover:text-foreground"}`}>{label}</button>
+                  ))}
+                </div>
+                {gameMode === "runner" ? (
+                  <RunnerGame
+                    key={note.game.length + note.game[0].question}
+                    items={note.game}
+                    best={note.gameBest}
+                    onScore={(sc) => onPatch((n) => (sc > (n.gameBest ?? 0) ? { gameBest: sc } : {}))}
+                    onRedo={() => makeJson("game", true)}
+                  />
+                ) : (
+                  <MatchGame key={note.game[0].question} items={note.game} />
+                )}
+              </div>
+            ) : null}
             {view === "cards" && note.flashcards && loading !== "cards" && (
               <Flashcards cards={note.flashcards} best={note.cardsKnown} onKnown={(k) => onPatch((n) => (k > (n.cardsKnown ?? 0) ? { cardsKnown: k } : {}))} />
             )}
@@ -288,7 +336,7 @@ export default function NoteView({
 
       {/* Чат: колонка справа на широком экране, выезжающая панель на телефоне */}
       <aside className="no-print sticky top-20 hidden h-[calc(100vh-6.5rem)] w-[360px] shrink-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm xl:block">
-        <ChatPanel note={note} summary={summary} onPatch={onPatch} />
+        <ChatPanel messages={note.chat ?? []} update={updateChat} summary={summary} />
       </aside>
       <button
         type="button"
@@ -300,7 +348,7 @@ export default function NoteView({
       {chatOpen && (
         <div className="no-print fixed inset-0 z-40 flex flex-col bg-black/50 backdrop-blur-sm xl:hidden" onClick={() => setChatOpen(false)}>
           <div className="pop-in mt-auto h-[85vh] overflow-hidden rounded-t-3xl border-t border-line bg-surface sm:mx-auto sm:mb-6 sm:h-[75vh] sm:w-[480px] sm:rounded-3xl sm:border" onClick={(e) => e.stopPropagation()}>
-            <ChatPanel note={note} summary={summary} onPatch={onPatch} onClose={() => setChatOpen(false)} />
+            <ChatPanel messages={note.chat ?? []} update={updateChat} summary={summary} onClose={() => setChatOpen(false)} />
           </div>
         </div>
       )}

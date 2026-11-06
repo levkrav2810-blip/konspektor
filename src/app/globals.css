@@ -108,3 +108,23 @@ body {
 .chat-md .md p { margin: 0.35rem 0; }
 .chat-md .md > :first-child { margin-top: 0; }
 .chat-md .md > :last-child { margin-bottom: 0; }
+
+/* Игра «Забег знаний» */
+.runner-road {
+  background:
+    repeating-linear-gradient(180deg, rgba(255,255,255,.06) 0 28px, transparent 28px 56px),
+    linear-gradient(180deg, #3730a3, #1e1b4b);
+  background-size: 100% 56px, 100% 100%;
+}
+.runner-road.running { animation: road-move 0.45s linear infinite; }
+@keyframes road-move { from { background-position: 0 0, 0 0; } to { background-position: 0 56px, 0 0; } }
+.runner-bob { animation: bob 0.35s ease-in-out infinite alternate; }
+@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+
+/* Печать презентации: все слайды по одному на страницу */
+.print-only { display: none; }
+@media print {
+  .print-only { display: block; }
+  .print-page { break-after: page; padding: 0; }
+  .print-page > div { box-shadow: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

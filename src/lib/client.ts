@@ -6,6 +6,9 @@ export type Flashcard = { front: string; back: string };
 export type QuizQuestion = { question: string; options: string[]; correctIndex: number; explanation: string };
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type Slide = { title: string; emoji: string; bullets: string[] };
+export type PodcastLine = { speaker: "A" | "B"; text: string };
+export type GameItem = { question: string; correct: string; wrong: string[] };
 export type Subject = { id: string; name: string; color: string; createdAt: number };
 
 export const SUBJECT_COLORS = ["#3b7bff", "#10b981", "#ec4899", "#f97316", "#8b5cf6", "#06b6d4", "#eab308", "#ef4444"];
@@ -80,6 +83,14 @@ export type Note = {
   subjectId?: string;
   /** Переписка с нейросетью по этому конспекту. */
   chat?: ChatMessage[];
+  /** Презентация по конспекту. */
+  slides?: Slide[];
+  /** Сценарий подкаста: реплики двух ведущих. */
+  podcast?: PodcastLine[];
+  /** Вопросы для учебной игры. */
+  game?: GameItem[];
+  /** Рекорд в игре. */
+  gameBest?: number;
   /** Лучший результат теста, в процентах. */
   quizBest?: number;
   /** Сколько карточек отмечено как выученные (лучший результат). */

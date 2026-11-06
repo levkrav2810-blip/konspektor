@@ -3,18 +3,31 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import Markdown from "./Markdown";
-import { postStream, type ChatMessage, type Note } from "@/lib/client";
-import type { NotePatch } from "./NoteView";
+import { postStream, type ChatMessage } from "@/lib/client";
 
-const SUGGESTIONS = ["Объясни главное простыми словами", "Какие вопросы могут быть на экзамене?", "Приведи пример из практики", "Что здесь самое сложное?"];
+const NOTE_SUGGESTIONS = ["Объясни главное простыми словами", "Какие вопросы могут быть на экзамене?", "Приведи пример из практики", "Что здесь самое сложное?"];
+const FREE_SUGGESTIONS = ["Объясни, что такое правоспособность", "Составь план подготовки к экзамену", "Помоги написать эссе", "Переведи текст на английский"];
 
-/** Чат с нейросетью по открытому конспекту. Переписка сохраняется в конспекте. */
-export default function ChatPanel({ note, summary, onPatch, onClose }: { note: Note; summary: string; onPatch: (p: NotePatch) => void; onClose?: () => void }) {
+/**
+ * Чат с нейросетью. С summary — по конспекту (переписка хранится в нём), без него — на любые вопросы.
+ * update получает функцию от самой свежей переписки, потому что ответ приходит не сразу.
+ */
+export default function ChatPanel({
+  messages,
+  update,
+  summary,
+  onClose,
+}: {
+  messages: ChatMessage[];
+  update: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
+  summary?: string;
+  onClose?: () => void;
+}) {
+  const SUGGESTIONS = summary ? NOTE_SUGGESTIONS : FREE_SUGGESTIONS;
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  const messages = note.chat ?? [];
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -26,11 +39,11 @@ export default function ChatPanel({ note, summary, onPatch, onClose }: { note: N
     setInput("");
     setError(null);
     const next: ChatMessage[] = [...messages, { role: "user", content: q }];
-    onPatch({ chat: next });
+    update(() => next);
     setStreaming("");
     try {
       const answer = await postStream("/api/chat", { summary, messages: next }, setStreaming);
-      onPatch((n) => ({ chat: [...(n.chat ?? []), { role: "assistant", content: answer }] }));
+      update((m) => [...m, { role: "assistant", content: answer }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -43,11 +56,11 @@ export default function ChatPanel({ note, summary, onPatch, onClose }: { note: N
       <div className="flex items-center gap-3 border-b border-line p-4">
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-accent to-violet-500 text-xl">🦉</span>
         <div className="min-w-0 flex-1">
-          <div className="font-semibold leading-tight">Спроси по теме</div>
-          <div className="text-xs text-muted">Нейросеть знает этот конспект</div>
+          <div className="font-semibold leading-tight">{summary ? "Спроси по теме" : "Чат с нейросетью"}</div>
+          <div className="text-xs text-muted">{summary ? "Нейросеть знает этот конспект" : "Отвечает на любые вопросы"}</div>
         </div>
         {messages.length > 0 && (
-          <button type="button" onClick={() => window.confirm("Очистить переписку?") && onPatch({ chat: [] })} className="btn-ghost text-xs" disabled={streaming !== null}>
+          <button type="button" onClick={() => window.confirm("Очистить переписку?") && update(() => [])} className="btn-ghost text-xs" disabled={streaming !== null}>
             Очистить
           </button>
         )}
@@ -58,7 +71,9 @@ export default function ChatPanel({ note, summary, onPatch, onClose }: { note: N
         <div className="flex gap-2.5">
           <span className="mt-0.5 text-lg">🦉</span>
           <div className="rounded-2xl rounded-tl-sm bg-background px-3.5 py-2.5 text-sm leading-relaxed">
-            Привет! Спрашивай что угодно по этому конспекту: объясню сложные места, приведу примеры и помогу подготовиться к экзамену.
+            {summary
+              ? "Привет! Спрашивай что угодно по этому конспекту: объясню сложные места, приведу примеры и помогу подготовиться к экзамену."
+              : "Привет! Я помогу с учёбой: объясню тему, составлю план ответа, проверю текст или переведу. Спрашивай что угодно."}
           </div>
         </div>
         {messages.map((m, i) =>
@@ -86,7 +101,7 @@ export default function ChatPanel({ note, summary, onPatch, onClose }: { note: N
       </div>
 
       {messages.length === 0 && (
-        <div className="flex gap-2 overflow-x-auto px-4 pb-2">
+        <div className="flex flex-wrap gap-2 px-4 pb-2">
           {SUGGESTIONS.map((s) => (
             <button key={s} type="button" onClick={() => ask(s)} className="btn-chip shrink-0 !text-xs">{s}</button>
           ))}

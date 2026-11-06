@@ -6,13 +6,14 @@ import NoteView, { Spinner, type NotePatch } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
 import NotesList from "@/components/NotesList";
 import Subjects from "@/components/Subjects";
+import ChatPanel from "@/components/ChatPanel";
 import ProfileView from "@/components/ProfileView";
 import SettingsView from "@/components/SettingsView";
 import LoginView from "@/components/LoginView";
 import Icon from "@/components/Icon";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
-import { deleteServerNotes, fetchServerNotes, fetchServerSubjects, loadSubjects, pushSubjects, saveSubjects, type Subject, fileToBase64, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { deleteServerNotes, fetchServerNotes, fetchServerSubjects, loadSubjects, pushSubjects, saveSubjects, type Subject, fileToBase64, type ChatMessage, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
@@ -20,7 +21,7 @@ type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string
 const TEXT_EXT = /\.(txt|md|srt|vtt|csv|json)$/i;
 const MAX_MEDIA_MB = 300;
 
-type Page = "home" | "subject" | "profile" | "settings";
+type Page = "home" | "subject" | "chat" | "profile" | "settings";
 
 /** Отмечает отправленные в аккаунт конспекты, если их не успели снова изменить. */
 function withSynced(notes: Note[], pushed: Note[]) {
@@ -30,6 +31,7 @@ function withSynced(notes: Note[], pushed: Note[]) {
 
 const NAV: [Page, string, string][] = [
   ["home", "home", "Главная"],
+  ["chat", "chat", "Чат с нейросетью"],
   ["profile", "user", "Личный кабинет"],
   ["settings", "settings", "Настройки"],
 ];
@@ -46,6 +48,8 @@ export default function Home() {
   const [subjectId, setSubjectId] = useState<string | null>(null);
   const [homeTab, setHomeTab] = useState<"notes" | "subjects">("notes");
   const [createTab, setCreateTab] = useState<Tab | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [adding, setAdding] = useState<Set<string> | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -129,6 +133,29 @@ export default function Home() {
       cancelled = true;
     };
   }, [userId]);
+
+  // Общий чат с нейросетью хранится в этом браузере.
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      /* eslint-disable-next-line react-hooks/set-state-in-effect */
+      setChat(JSON.parse(localStorage.getItem(`konspektor.chat.${userId}`) || "[]"));
+    } catch {
+      setChat([]);
+    }
+  }, [userId]);
+
+  function updateChat(fn: (m: ChatMessage[]) => ChatMessage[]) {
+    setChat((prev) => {
+      const next = fn(prev).slice(-200);
+      try {
+        localStorage.setItem(`konspektor.chat.${userId}`, JSON.stringify(next));
+      } catch {
+        // хранилище недоступно — переписка живёт до перезагрузки
+      }
+      return next;
+    });
+  }
 
   function changeSubjects(next: Subject[]) {
     if (!userId) return;
@@ -302,7 +329,7 @@ export default function Home() {
   const { user } = session;
 
   const showNote = current && (page === "home" || page === "subject");
-  const title = page === "settings" ? "Настройки" : page === "profile" ? "Личный кабинет" : showNote ? "Конспект" : openedSubject ? openedSubject.name : "Главная";
+  const title = page === "chat" ? "Чат с нейросетью" : page === "settings" ? "Настройки" : page === "profile" ? "Личный кабинет" : showNote ? "Конспект" : openedSubject ? openedSubject.name : "Главная";
 
   const SOURCES: [Tab, string, string, string][] = [
     ["voice", "mic", "Записать аудио", "#ef4444"],
@@ -444,6 +471,12 @@ export default function Home() {
             </>
           )}
 
+          {page === "chat" && (
+            <div className="card fade-up mx-auto h-[calc(100vh-9rem)] max-w-3xl overflow-hidden md:h-[calc(100vh-5rem)]">
+              <ChatPanel messages={chat} update={updateChat} />
+            </div>
+          )}
+
           {page === "subject" && !showNote && (
             openedSubject ? (
               <>
@@ -460,6 +493,66 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="mb-8">{createBlock}</div>
+                {!stage && !draft && (
+                  <div className="mb-2 flex justify-end">
+                    <button type="button" onClick={() => setAdding(new Set())} className="btn-secondary flex items-center gap-2 rounded-full">
+                      <Icon name="plus" className="h-4 w-4" />Добавить конспекты
+                    </button>
+                  </div>
+                )}
+                {adding && (
+                  <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center" onClick={() => setAdding(null)}>
+                    <div className="pop-in flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-line bg-surface sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between border-b border-line p-4">
+                        <div className="font-semibold">Добавить в «{openedSubject.name}»</div>
+                        <button type="button" onClick={() => setAdding(null)} className="btn-icon" aria-label="Закрыть"><Icon name="close" /></button>
+                      </div>
+                      <ul className="flex-1 overflow-y-auto p-2">
+                        {notes.filter((n) => n.subjectId !== openedSubject.id).length === 0 && <li className="p-6 text-center text-sm text-muted">Все конспекты уже в этом предмете.</li>}
+                        {notes
+                          .filter((n) => n.subjectId !== openedSubject.id)
+                          .map((n) => {
+                            const other = subjects.find((x) => x.id === n.subjectId);
+                            const on = adding.has(n.id);
+                            return (
+                              <li key={n.id}>
+                                <label className={`flex cursor-pointer items-center gap-3 rounded-xl p-3 transition ${on ? "bg-accent/10" : "hover:bg-foreground/5"}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => {
+                                      const next = new Set(adding);
+                                      if (on) next.delete(n.id);
+                                      else next.add(n.id);
+                                      setAdding(next);
+                                    }}
+                                    className="h-5 w-5 accent-[var(--accent)]"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium">{n.title}</span>
+                                    <span className="block text-xs text-muted">{new Date(n.createdAt).toLocaleDateString("ru-RU")}{other ? ` · сейчас в «${other.name}»` : ""}</span>
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                      </ul>
+                      <div className="border-t border-line p-4">
+                        <button
+                          type="button"
+                          disabled={!adding.size}
+                          onClick={() => {
+                            persist(notesRef.current.map((n) => (adding.has(n.id) ? { ...n, subjectId: openedSubject.id } : n)));
+                            setAdding(null);
+                          }}
+                          className="btn-primary w-full"
+                        >
+                          Добавить {adding.size ? `(${adding.size})` : ""}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {!stage && !draft && (
                   <NotesList
                     notes={notes.filter((n) => n.subjectId === openedSubject.id)}
