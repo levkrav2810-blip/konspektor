@@ -19,24 +19,92 @@ export type Note = {
   translations?: Record<string, string>;
   /** Язык, на котором конспект сейчас показан; пусто — оригинал. */
   lang?: string;
+  /** Когда конспект меняли в последний раз: нужно, чтобы понять, какая копия свежее. */
+  updatedAt?: number;
+  /** Копия уже есть в аккаунте. Если такого конспекта на сервере нет, значит его удалили с другого устройства. */
+  synced?: boolean;
 };
 
-const KEY = "konspektor.notes.v1";
+// Конспекты, сделанные до входа по логину, лежали в общем ключе; они переезжают к первому, кто войдёт.
+const LEGACY_KEY = "konspektor.notes.v1";
+const keyFor = (userId: string) => `konspektor.notes.${userId}`;
 
-export function loadNotes(): Note[] {
+function read(key: string): Note[] {
   try {
-    return JSON.parse(localStorage.getItem(KEY) || "[]");
+    const v = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(v) ? v : [];
   } catch {
     return [];
   }
 }
 
-export function saveNotes(notes: Note[]) {
+/** Копия конспектов пользователя в этом браузере. */
+export function loadNotes(userId: string): Note[] {
+  const own = read(keyFor(userId));
+  const legacy = read(LEGACY_KEY);
+  if (!legacy.length) return own;
+  const merged = mergeNotes(own, legacy);
+  saveNotes(userId, merged);
   try {
-    localStorage.setItem(KEY, JSON.stringify(notes));
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
-    // переполнено хранилище — просто не сохраняем
+    // не получилось — перенесём в следующий раз
   }
+  return merged;
+}
+
+export function saveNotes(userId: string, notes: Note[]) {
+  try {
+    localStorage.setItem(keyFor(userId), JSON.stringify(notes));
+  } catch {
+    // переполнено хранилище — конспекты всё равно есть в аккаунте
+  }
+}
+
+const stamp = (n: Note) => n.updatedAt ?? n.createdAt;
+
+/** Объединяет два списка: для одинаковых id берётся более свежая копия. */
+export function mergeNotes(a: Note[], b: Note[]): Note[] {
+  const byId = new Map(a.map((n) => [n.id, n]));
+  for (const n of b) {
+    const had = byId.get(n.id);
+    if (!had || stamp(n) > stamp(had)) byId.set(n.id, n);
+  }
+  return [...byId.values()].sort((x, y) => y.createdAt - x.createdAt);
+}
+
+/** Конспекты из аккаунта; null — хранилище на сервере не подключено. */
+export async function fetchServerNotes(): Promise<Note[] | null> {
+  const res = await authFetch("/api/notes");
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return data.enabled ? (data.notes as Note[]).map((n) => ({ ...n, synced: true })) : null;
+}
+
+/** Отправляет конспекты на сервер пачками, чтобы не упереться в размер запроса. */
+export async function pushNotes(notes: Note[]) {
+  let batch: Note[] = [];
+  let size = 0;
+  const send = async () => {
+    if (!batch.length) return;
+    const res = await authFetch("/api/notes", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: batch }) });
+    if (!res.ok) throw new Error(await readError(res));
+    batch = [];
+    size = 0;
+  };
+  for (const n of notes) {
+    const len = JSON.stringify(n).length;
+    if (size + len > 2_500_000) await send();
+    batch.push(n);
+    size += len;
+  }
+  await send();
+}
+
+export async function deleteServerNotes(ids: string[]) {
+  if (!ids.length) return;
+  const res = await authFetch("/api/notes", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export function titleFromMarkdown(md: string, fallback: string) {

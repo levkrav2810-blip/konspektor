@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import InputPanel, { type Material } from "@/components/InputPanel";
 import NoteView, { Spinner } from "@/components/NoteView";
 import Markdown from "@/components/Markdown";
@@ -10,7 +10,7 @@ import SettingsView from "@/components/SettingsView";
 import LoginView from "@/components/LoginView";
 import { applyTheme, DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from "@/lib/settings";
 import { fullName, loadSession, LOGOUT_EVENT, saveSession, type Session } from "@/lib/user";
-import { fileToBase64, loadNotes, plural, postForm, postJson, postStream, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
+import { deleteServerNotes, fetchServerNotes, fileToBase64, loadNotes, mergeNotes, plural, postForm, postJson, postStream, pushNotes, saveNotes, titleFromMarkdown, type Note } from "@/lib/client";
 import { audioToChunks, transcribeChunks } from "@/lib/audio";
 
 type SummarizeBody = { text?: string; file?: { base64: string; mediaType: string; name?: string } };
@@ -19,6 +19,12 @@ const TEXT_EXT = /\.(txt|md|srt|vtt|csv|json)$/i;
 const MAX_MEDIA_MB = 300;
 
 type Page = "home" | "profile" | "settings";
+
+/** Отмечает отправленные в аккаунт конспекты, если их не успели снова изменить. */
+function withSynced(notes: Note[], pushed: Note[]) {
+  const sent = new Map(pushed.map((n) => [n.id, n.updatedAt]));
+  return notes.map((n) => (!n.synced && sent.has(n.id) && sent.get(n.id) === n.updatedAt ? { ...n, synced: true } : n));
+}
 
 const NAV: [Page, string, string][] = [
   ["home", "🏠", "Главная"],
@@ -37,11 +43,16 @@ export default function Home() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // undefined — ещё не прочитали localStorage, null — нужно войти
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  // true — конспекты хранятся в аккаунте; false — только в этом браузере; null — ещё не знаем
+  const [cloud, setCloud] = useState<boolean | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  // свежий список для асинхронных обработчиков, которые иначе видят устаревший notes
+  const notesRef = useRef<Note[]>([]);
+  const userId = session?.user.id;
 
   // История и настройки хранятся в localStorage, поэтому читаем их только в браузере после гидрации.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
-    setNotes(loadNotes());
     setSettings(loadSettings());
     setSession(loadSession());
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -49,6 +60,47 @@ export default function Home() {
     window.addEventListener(LOGOUT_EVENT, logout);
     return () => window.removeEventListener(LOGOUT_EVENT, logout);
   }, []);
+
+  // Конспекты пользователя: сначала копия из браузера, затем объединяем с аккаунтом на сервере.
+  useEffect(() => {
+    if (!userId) return;
+    const local = loadNotes(userId);
+    notesRef.current = local;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setNotes(local);
+    setCloud(null);
+    setSyncError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchServerNotes();
+        if (cancelled) return;
+        if (!remote) return setCloud(false);
+        const onServer = new Set(remote.map((n) => n.id));
+        // уже бывшие в аккаунте, но пропавшие оттуда конспекты удалили на другом устройстве
+        const local = notesRef.current.filter((n) => !n.synced || onServer.has(n.id));
+        const merged = mergeNotes(remote, local);
+        notesRef.current = merged;
+        setNotes(merged);
+        saveNotes(userId, merged);
+        setCloud(true);
+        // то, чего нет в аккаунте или что в браузере свежее (старые конспекты, правки без интернета)
+        const toPush = merged.filter((n) => !remote.includes(n));
+        await pushNotes(toPush);
+        if (cancelled || !toPush.length) return;
+        const synced = withSynced(notesRef.current, toPush);
+        notesRef.current = synced;
+        setNotes(synced);
+        saveNotes(userId, synced);
+      } catch (e) {
+        if (!cancelled) setSyncError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   function changeSettings(s: Settings) {
     setSettings(s);
@@ -75,13 +127,38 @@ export default function Home() {
     setMenuOpen(false);
   }
 
-  function persist(next: Note[]) {
+  /** Отмечает конспекты, которые точно сохранены в аккаунте. */
+  function markSynced(pushed: Note[]) {
+    if (!userId || !pushed.length) return;
+    const next = withSynced(notesRef.current, pushed);
+    notesRef.current = next;
     setNotes(next);
-    saveNotes(next);
+    saveNotes(userId, next);
+  }
+
+  /** Сохраняет новый список: в браузер сразу, в аккаунт — только изменённые и удалённые конспекты. */
+  function persist(next: Note[]) {
+    if (!userId) return;
+    const prev = notesRef.current;
+    const changed = next.filter((n) => !prev.includes(n));
+    const now = Date.now();
+    const stamped = next.map((n) => (changed.includes(n) ? { ...n, updatedAt: now, synced: false } : n));
+    notesRef.current = stamped;
+    setNotes(stamped);
+    saveNotes(userId, stamped);
+    if (!cloud) return;
+    const removed = prev.filter((p) => !next.some((n) => n.id === p.id)).map((p) => p.id);
+    const toPush = stamped.filter((n, i) => changed.includes(next[i]));
+    Promise.all([pushNotes(toPush), deleteServerNotes(removed)])
+      .then(() => {
+        markSynced(toPush);
+        setSyncError(null);
+      })
+      .catch((e) => setSyncError(`Конспект сохранён в браузере, но не в аккаунте: ${e instanceof Error ? e.message : e}`));
   }
 
   function updateNote(n: Note) {
-    persist(notes.map((x) => (x.id === n.id ? n : x)));
+    persist(notesRef.current.map((x) => (x.id === n.id ? n : x)));
   }
 
   async function transcribe(blob: Blob) {
@@ -147,7 +224,7 @@ export default function Home() {
         summary,
         transcript,
       };
-      persist([note, ...notes]);
+      persist([note, ...notesRef.current]);
       setCurrentId(note.id);
       setDraft("");
     } catch (e) {
@@ -158,7 +235,7 @@ export default function Home() {
   }
 
   function remove(id: string) {
-    persist(notes.filter((n) => n.id !== id));
+    persist(notesRef.current.filter((n) => n.id !== id));
     if (currentId === id) setCurrentId(null);
   }
 
@@ -207,7 +284,7 @@ export default function Home() {
 
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
           {page === "settings" && <SettingsView settings={settings} onChange={changeSettings} />}
-          {page === "profile" && <ProfileView user={user} notes={notes} onLogout={() => login(null)} onNotes={persist} onOpen={openNote} />}
+          {page === "profile" && <ProfileView user={user} notes={notes} cloud={cloud} syncError={syncError} onLogout={() => login(null)} onNotes={persist} onOpen={openNote} />}
           {page === "home" && !current && (
             <>
               {!stage && !draft && (

@@ -8,12 +8,16 @@ import { fullName, type User } from "@/lib/user";
 export default function ProfileView({
   user,
   notes,
+  cloud,
+  syncError,
   onLogout,
   onNotes,
   onOpen,
 }: {
   user: User;
   notes: Note[];
+  cloud: boolean | null;
+  syncError: string | null;
   onLogout: () => void;
   onNotes: (n: Note[]) => void;
   onOpen: (id: string) => void;
@@ -70,7 +74,7 @@ export default function ProfileView({
           <div className="truncate text-xl font-semibold">{fullName(user)}</div>
           <div className="mt-0.5 text-muted">Группа {user.group}</div>
         </div>
-        <button type="button" onClick={() => window.confirm("Выйти? Конспекты останутся в этом браузере.") && onLogout()} className="btn-secondary">Выйти</button>
+        <button type="button" onClick={() => window.confirm(cloud ? "Выйти? Конспекты сохранены в аккаунте." : "Выйти? Конспекты останутся в этом браузере.") && onLogout()} className="btn-secondary">Выйти</button>
       </section>
 
       <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -103,8 +107,13 @@ export default function ProfileView({
       <section className="card mt-4 p-5 sm:p-6">
         <h2 className="font-semibold">Мои данные</h2>
         <p className="mt-1 text-sm text-muted">
-          Конспекты хранятся в этом браузере. Чтобы перенести их на другое устройство, скачайте файл и загрузите его там.
+          {cloud
+            ? "☁️ Конспекты сохраняются в вашем аккаунте: войдите с любого устройства, и они будут на месте."
+            : cloud === false
+              ? "Конспекты хранятся в этом браузере. Чтобы перенести их на другое устройство, скачайте файл и загрузите его там."
+              : "Проверяю конспекты в аккаунте…"}
         </p>
+        {syncError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{syncError}</p>}
         <div className="mt-4 flex flex-wrap gap-2">
           <button type="button" onClick={exportAll} disabled={!notes.length} className="btn-secondary">⬇️ Скачать все конспекты</button>
           <button type="button" onClick={() => fileRef.current?.click()} className="btn-secondary">⬆️ Загрузить из файла</button>
