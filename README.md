@@ -32,9 +32,19 @@ npm run dev                  # http://localhost:3000
 
 ## Деплой
 
-### Timeweb Cloud (открывается в России без VPN)
+### Спринтхост (основной вариант, открывается в России без VPN)
 
-Адреса `*.vercel.app` у части российских провайдеров заблокированы, поэтому основной хостинг — Timeweb Cloud App Platform. Сайт собирается по `Dockerfile` из этого репозитория.
+Виртуальный хостинг Спринтхоста запускает Node.js через Phusion Passenger, PostgreSQL есть прямо на хостинге.
+
+- Сайт собирается на GitHub (`.github/workflows/deploy-sprinthost.yml` → `scripts/build-sprinthost.sh`, Next.js `output: standalone`) и после каждого Merge в `main` загружается по SSH в `~/konspektor` на хостинге, затем Passenger перезапускается (`tmp/restart.txt`). Секреты репозитория: `SPRINTHOST_HOST`, `SPRINTHOST_USER`, `SPRINTHOST_PASSWORD`.
+- Запускающий файл — `deploy/sprinthost/app.js`, он читает ключи из `~/konspektor/.env.production` (файл создаётся один раз на сервере и при выкладке сохраняется).
+- `.htaccess` для папки сайта — `deploy/sprinthost/htaccess.example`.
+- В `.env.production` те же переменные, что ниже, и `DATABASE_URL=postgresql://пользователь:пароль@localhost:5432/база`.
+
+
+### Timeweb Cloud или другой хостинг с Docker
+
+Сайт собирается по `Dockerfile` из этого репозитория.
 
 1. timeweb.cloud → App Platform → Создать → Backend → **Dockerfile**.
 2. Подключить GitHub, выбрать репозиторий `konspektor`, ветку `main`, включить автодеплой (каждый Merge в `main` пересобирает сайт).
