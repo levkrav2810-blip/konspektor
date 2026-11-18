@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Passenger запускает обычный CommonJS-файл */
 // Запуск сайта на виртуальном хостинге Спринтхост (Phusion Passenger, PassengerStartupFile app.js).
 // Рядом лежит готовая сборка Next.js (server.js, .next, public, node_modules), её собирает GitHub.
 // Ключи берутся из файла .env.production в этой же папке: его создают один раз на сервере, в репозиторий он не попадает.
