@@ -1,0 +1,64 @@
+# Выкладка на Спринтхост: после каждого Merge в main GitHub сам собирает сайт и загружает его на хостинг по SSH.
+# Нужны секреты репозитория (Settings → Secrets and variables → Actions):
+#   SPRINTHOST_HOST     — адрес SSH-сервера из панели Спринтхоста
+#   SPRINTHOST_USER     — логин хостинга
+#   SPRINTHOST_PASSWORD — пароль от SSH (обычно тот же, что от панели)
+# Пока секретов нет, выкладка просто пропускается.
+name: Выкладка на Спринтхост
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-sprinthost
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.SPRINTHOST_HOST }}
+      USER_NAME: ${{ secrets.SPRINTHOST_USER }}
+      SSHPASS: ${{ secrets.SPRINTHOST_PASSWORD }}
+    steps:
+      - name: Проверить, настроена ли выкладка
+        id: check
+        run: |
+          if [ -n "$HOST" ] && [ -n "$USER_NAME" ] && [ -n "$SSHPASS" ]; then echo "ready=yes" >> "$GITHUB_OUTPUT"; else echo "Секреты SPRINTHOST_* не заданы — пропускаю выкладку."; fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'yes'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'yes'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Собрать сайт
+        if: steps.check.outputs.ready == 'yes'
+        run: |
+          npm ci
+          ./scripts/build-sprinthost.sh
+
+      - name: Загрузить на Спринтхост
+        if: steps.check.outputs.ready == 'yes'
+        run: |
+          sudo apt-get install -y -qq sshpass > /dev/null
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30"
+          # Распаковываем рядом, переносим .env.production с ключами (он живёт только на сервере) и подменяем папку целиком.
+          tar czf - -C dist-sprinthost . | $SSH "$USER_NAME@$HOST" '
+            set -e
+            rm -rf ~/konspektor.new ~/konspektor.old
+            mkdir -p ~/konspektor.new
+            tar xzf - -C ~/konspektor.new
+            if [ -f ~/konspektor/.env.production ]; then cp ~/konspektor/.env.production ~/konspektor.new/; else echo "Внимание: нет ~/konspektor/.env.production — создайте его по инструкции"; fi
+            mkdir -p ~/konspektor.new/tmp
+            if [ -d ~/konspektor ]; then mv ~/konspektor ~/konspektor.old; fi
+            mv ~/konspektor.new ~/konspektor
+            touch ~/konspektor/tmp/restart.txt
+            rm -rf ~/konspektor.old
+          '
+          echo "Готово: сайт перезапущен."

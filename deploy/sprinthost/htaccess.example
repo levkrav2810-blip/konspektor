@@ -1,0 +1,9 @@
+# Положить в ~/domains/ВАШ-ДОМЕН/public_html/.htaccess
+# Вместо LOGIN — логин хостинга Спринтхост.
+PassengerAppRoot /home/LOGIN/konspektor
+PassengerAppType node
+PassengerStartupFile app.js
+PassengerResolveSymlinksInDocumentRoot on
+PassengerFriendlyErrorPages off
+Options -MultiViews
+Require all granted

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Для Спринтхоста собираем самодостаточную папку (scripts/build-sprinthost.sh), на Vercel и в Docker — как обычно.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
