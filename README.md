@@ -28,7 +28,7 @@ npm run dev                  # http://localhost:3000
 - `src/app/api/extract` — текст из .docx.
 - `src/app/api/flashcards`, `quiz` — карточки и тест в строгом JSON.
 - `src/app/api/transform` — перевод, шпаргалка, упрощение, интеллект-карта, план ответа.
-- Промпты: `src/lib/prompts.ts`. История конспектов хранится в браузере (localStorage).
+- Промпты: `src/lib/prompts.ts`. Хранилище аккаунтов: `src/lib/store.ts`.
 
 ## Деплой
 
@@ -39,12 +39,18 @@ npm run dev                  # http://localhost:3000
 1. timeweb.cloud → App Platform → Создать → Backend → **Dockerfile**.
 2. Подключить GitHub, выбрать репозиторий `konspektor`, ветку `main`, включить автодеплой (каждый Merge в `main` пересобирает сайт).
 3. Регион — Россия, тариф — самый маленький (сайт лёгкий, всю работу делают нейросети).
-4. Переменные окружения — те же, что в Vercel → Settings → Environment Variables: `AI_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `STT_PROVIDER`, `YANDEX_API_KEY`, `YANDEX_FOLDER_ID` и, если есть, `AUTH_SECRET`.
+4. Переменные окружения — те же, что в Vercel → Settings → Environment Variables: `AI_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `STT_PROVIDER`, `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`, `AUTH_SECRET` и новая `DATABASE_URL` (см. ниже).
 5. Запустить деплой. Сайт будет доступен на техническом домене Timeweb, позже можно подключить свой.
 
 Если сборка по Dockerfile не идёт, подойдёт и пресет Next.js с включённым SSR: сборка `npm run build`, запуск `npm start`, Node.js 20.9 или новее.
 
-Файлы контейнера при каждом деплое создаются заново, поэтому всё, что должно храниться на сервере, хранится в базе (Redis), а не на диске.
+Файлы контейнера при каждом деплое создаются заново, поэтому всё, что должно храниться на сервере, хранится в базе, а не на диске.
+
+### База данных (конспекты в аккаунте)
+
+Основной вариант — PostgreSQL: timeweb.cloud → Базы данных → PostgreSQL, тот же регион, что у сайта. Строку подключения из панели вписать в переменную `DATABASE_URL`, например `postgresql://gen_user:пароль@адрес:5432/default_db?sslmode=require`. Таблицы `notes`, `subjects` и `activity` сайт создаёт сам при первом обращении (схема в `src/lib/store.ts`).
+
+Если раньше была подключена Upstash Redis на Vercel, можно на время переезда оставить и её переменные (`KV_REST_API_URL`, `KV_REST_API_TOKEN`): при первом входе каждого человека его конспекты и предметы один раз скопируются из Redis в PostgreSQL. После того как все зашли, эти переменные можно удалить.
 
 ### Vercel
 
@@ -54,9 +60,9 @@ npm run dev                  # http://localhost:3000
 
 Сайт закрыт для группы ЮФ МГУ-120: войти можно только по логину (имя.фамилия латиницей) и паролю из 6 цифр. Нейросеть отвечает только вошедшим. Список участников и хэши паролей лежат в `src/lib/students.ts`, сами пароли в репозиторий не попадают. Логин можно вводить в любом виде: `lev.kravchenko`, `Lev Kravchenko`, `levkravchenko`.
 
-Конспекты хранятся в аккаунте (Redis-хэш `notes:<логин>`), если подключена база, и копией в браузере; без базы — только в браузере.
+Конспекты хранятся в аккаунте (PostgreSQL через `DATABASE_URL`, либо Upstash Redis на Vercel) и копией в браузере; без базы — только в браузере.
 
-Список группы видят только администраторы (`ADMINS` в `src/lib/students.ts`). Чтобы там было видно, кто и когда заходил, подключите базу: Vercel → Storage → Create Database → Upstash Redis (бесплатно) → Connect к проекту, затем Redeploy. Vercel сам добавит `KV_REST_API_URL` и `KV_REST_API_TOKEN`.
+Список группы видят только администраторы (`ADMINS` в `src/lib/students.ts`). Чтобы там было видно, кто и когда заходил, нужна та же база (`DATABASE_URL`).
 
 ## Что дальше
 

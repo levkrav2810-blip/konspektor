@@ -1,5 +1,5 @@
 import { createHash, createHmac, scryptSync, timingSafeEqual } from "node:crypto";
-import { hasDb, pipeline } from "@/lib/db";
+import { activityOf, hasStore, recordActivity, type Activity } from "@/lib/store";
 import { ADMINS, GROUP, STUDENTS, type Student } from "@/lib/students";
 
 export type User = { id: string; firstName: string; lastName: string; group: string; admin: boolean };
@@ -48,31 +48,22 @@ export async function requireUser(req: Request): Promise<Response | null> {
   return Response.json({ error: "Войдите на сайт заново: логин и пароль" }, { status: 401 });
 }
 
-export type Activity = { lastLogin?: number; lastSeen?: number; logins?: number; actions?: number };
+export type { Activity };
 
 /** Отмечает вход или действие с нейросетью. Без базы данных молча ничего не делает. */
 export async function track(login: string, isLogin: boolean) {
-  if (!hasDb()) return;
-  const now = Date.now();
+  if (!hasStore()) return;
   try {
-    await pipeline([
-      ["HSET", `seen:${login}`, "lastSeen", now, ...(isLogin ? ["lastLogin", now] : [])],
-      ["HINCRBY", `seen:${login}`, isLogin ? "logins" : "actions", 1],
-    ]);
+    await recordActivity(login, isLogin);
   } catch (err) {
     console.error(err); // отметка не важнее самого конспекта
   }
 }
 
-/** Список группы с отметками о входах; null — база данных не подключена. */
+/** Список группы с отметками о входах; noDb — база данных не подключена. */
 export async function groupActivity(): Promise<(Pick<User, "id" | "firstName" | "lastName"> & Activity)[] | { noDb: true; members: Pick<User, "id" | "firstName" | "lastName">[] }> {
   const members = STUDENTS.map(({ login, firstName, lastName }) => ({ id: login, firstName, lastName }));
-  if (!hasDb()) return { noDb: true, members };
-  const rows = (await pipeline(members.map((m) => ["HGETALL", `seen:${m.id}`]))) as string[][];
-  return members.map((m, i) => {
-    const flat = rows[i] || [];
-    const a: Record<string, number> = {};
-    for (let j = 0; j < flat.length; j += 2) a[flat[j]] = Number(flat[j + 1]);
-    return { ...m, ...a };
-  });
+  if (!hasStore()) return { noDb: true, members };
+  const acts = await activityOf(members.map((m) => m.id));
+  return members.map((m, i) => ({ ...m, ...acts[i] }));
 }
