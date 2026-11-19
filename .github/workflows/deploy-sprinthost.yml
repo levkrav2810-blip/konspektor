@@ -2,7 +2,9 @@
 # Нужны секреты репозитория (Settings → Secrets and variables → Actions):
 #   SPRINTHOST_HOST     — адрес SSH-сервера из панели Спринтхоста
 #   SPRINTHOST_USER     — логин хостинга
-#   SPRINTHOST_PASSWORD — пароль от SSH (обычно тот же, что от панели)
+#   SPRINTHOST_SSH_KEY  — закрытый SSH-ключ (Спринтхост пускает по SSH только по ключу);
+#                         открытая часть ключа лежит на хостинге в ~/.ssh/authorized_keys
+#   SPRINTHOST_PASSWORD — запасной вариант вместо ключа, если хостинг разрешит вход по паролю
 # Пока секретов нет, выкладка просто пропускается.
 name: Выкладка на Спринтхост
 
@@ -22,11 +24,12 @@ jobs:
       HOST: ${{ secrets.SPRINTHOST_HOST }}
       USER_NAME: ${{ secrets.SPRINTHOST_USER }}
       SSHPASS: ${{ secrets.SPRINTHOST_PASSWORD }}
+      SSH_KEY: ${{ secrets.SPRINTHOST_SSH_KEY }}
     steps:
       - name: Проверить, настроена ли выкладка
         id: check
         run: |
-          if [ -n "$HOST" ] && [ -n "$USER_NAME" ] && [ -n "$SSHPASS" ]; then echo "ready=yes" >> "$GITHUB_OUTPUT"; else echo "Секреты SPRINTHOST_* не заданы — пропускаю выкладку."; fi
+          if [ -n "$HOST" ] && [ -n "$USER_NAME" ] && { [ -n "$SSH_KEY" ] || [ -n "$SSHPASS" ]; }; then echo "ready=yes" >> "$GITHUB_OUTPUT"; else echo "Секреты SPRINTHOST_* не заданы — пропускаю выкладку."; fi
 
       - uses: actions/checkout@v4
         if: steps.check.outputs.ready == 'yes'
@@ -46,8 +49,16 @@ jobs:
       - name: Загрузить на Спринтхост
         if: steps.check.outputs.ready == 'yes'
         run: |
-          sudo apt-get install -y -qq sshpass > /dev/null
-          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30"
+          OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=30"
+          if [ -n "$SSH_KEY" ]; then
+            mkdir -p ~/.ssh && chmod 700 ~/.ssh
+            printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/sprinthost && chmod 600 ~/.ssh/sprinthost
+            SSH="ssh -i $HOME/.ssh/sprinthost -o IdentitiesOnly=yes -o BatchMode=yes $OPTS"
+          else
+            sudo apt-get install -y -qq sshpass > /dev/null
+            SSH="sshpass -e ssh $OPTS"
+          fi
+          $SSH "$USER_NAME@$HOST" 'echo "Вход на хостинг по SSH работает"'
           # Распаковываем рядом, переносим .env.production с ключами (он живёт только на сервере) и подменяем папку целиком.
           tar czf - -C dist-sprinthost . | $SSH "$USER_NAME@$HOST" '
             set -e
