@@ -49,10 +49,24 @@ jobs:
       - name: Загрузить на Спринтхост
         if: steps.check.outputs.ready == 'yes'
         run: |
+          # Лишние пробелы и переносы строк, случайно попавшие в секреты, убираем.
+          HOST=$(printf '%s' "$HOST" | tr -d '[:space:]')
+          USER_NAME=$(printf '%s' "$USER_NAME" | tr -d '[:space:]')
           OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=30"
           if [ -n "$SSH_KEY" ]; then
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/sprinthost && chmod 600 ~/.ssh/sprinthost
+            # Подсказки на случай ошибки: сам ключ не печатаем, только его отпечаток (он не секретный).
+            if ! head -1 ~/.ssh/sprinthost | grep -q 'BEGIN .*PRIVATE KEY'; then
+              echo "::error::В секрете SPRINTHOST_SSH_KEY не закрытый ключ. Нужно содержимое файла konspektor_deploy (без .pub), от строки -----BEGIN до строки -----END целиком."
+              exit 1
+            fi
+            if ! ssh-keygen -y -f ~/.ssh/sprinthost > ~/.ssh/sprinthost.pub 2>/dev/null; then
+              echo "::error::Ключ в SPRINTHOST_SSH_KEY повреждён (скопирован не целиком?). Вставьте файл konspektor_deploy заново."
+              exit 1
+            fi
+            echo "Отпечаток ключа из секрета: $(ssh-keygen -lf ~/.ssh/sprinthost.pub)"
+            echo "Логин из секрета SPRINTHOST_USER: ${#USER_NAME} символов (у вас должно быть 8)."
             SSH="ssh -i $HOME/.ssh/sprinthost -o IdentitiesOnly=yes -o BatchMode=yes $OPTS"
           else
             sudo apt-get install -y -qq sshpass > /dev/null
