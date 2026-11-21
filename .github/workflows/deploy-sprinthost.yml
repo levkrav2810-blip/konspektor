@@ -87,3 +87,19 @@ jobs:
             rm -rf ~/konspektor.old
           '
           echo "Готово: сайт перезапущен."
+          # Проверка на сервере: настройки сайта, журнал ошибок и пробный запуск. Ключи из .env.production не печатаем, только их имена.
+          $SSH "$USER_NAME@$HOST" '
+            echo "== node: $(command -v node) $(node -v 2>&1)"
+            echo "== ключи в .env.production:"; cut -d= -f1 ~/konspektor/.env.production 2>/dev/null | grep -v "^#" | tr "\n" " "; echo
+            for d in ~/domains/*/public_html; do
+              [ -f "$d/.htaccess" ] || continue
+              echo "== $d:"; ls -la "$d" | head -20
+              echo "-- .htaccess:"; cat -A "$d/.htaccess" | head -20
+            done
+            echo "== журналы ошибок за последний час:"
+            find ~ -maxdepth 4 \( -name "*error*log*" -o -name "passenger*.log" \) -mmin -60 -type f 2>/dev/null | grep -v node_modules | while read f; do echo "-- $f"; tail -n 25 "$f"; done
+            echo "== пробный запуск сайта (15 секунд):"
+            cd ~/konspektor && PORT=39123 HOSTNAME=127.0.0.1 timeout 15 node app.js > ~/konspektor-try.log 2>&1 &
+            sleep 8; curl -s -o /dev/null -w "ответ сайта: HTTP %{http_code}\n" http://127.0.0.1:39123/ || echo "сайт не ответил"
+            wait; head -40 ~/konspektor-try.log; rm -f ~/konspektor-try.log
+          ' || true
